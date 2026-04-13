@@ -159,7 +159,11 @@ def list_items(
     elif sort_by == "profit":
         filtered.sort(key=lambda x: x.profit_absolute, reverse=descending)
     elif sort_by == "final_score":
-        filtered.sort(key=lambda x: x.final_score, reverse=descending)
+        volumes = _fetch_volumes(filtered)
+        filtered.sort(
+            key=lambda x: ((volumes.get(x.product_id) or 0) > 0, x.final_score),
+            reverse=descending,
+        )
     elif sort_by == "profit_per_focus":
         filtered.sort(key=lambda x: x.profit_per_focus, reverse=descending)
     else:
@@ -169,7 +173,7 @@ def list_items(
     page = filtered[offset: offset + limit]
 
     # For non-volume sorts, fetch volumes only for the current page
-    if sort_by != "daily_volume":
+    if sort_by not in ("daily_volume", "final_score"):
         volumes = _fetch_volumes(page)
 
     return ItemsResponse(

@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -263,6 +264,39 @@ class TestListItems(unittest.TestCase):
     def test_order_invalid_returns_422(self) -> None:
         resp = self.client.get("/items", params={"order": "invalid"})
         self.assertEqual(resp.status_code, 422)
+
+    @patch("src.api.routes.items.AlbionAPIClient")
+    def test_sort_by_final_score_pushes_zero_volume_to_bottom(self, mock_client_cls: MagicMock) -> None:
+        """Items with daily_volume > 0 should appear before items without when sorting by final_score desc."""
+        # Build history data: only T4_LEATHER_ARMOR has volume data.
+        # T4_CLOTH_ARMOR and T5_CLOTH_ARMOR have no volume.
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.get_history_bulk.return_value = {
+            "T4_LEATHER_ARMOR": [{"data": [{"item_count": 50}, {"item_count": 80}]}],
+            # Other items intentionally missing → no volume
+        }
+
+        resp = self.client.get("/items", params={"sort_by": "final_score", "order": "desc"})
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.json()
+        items = body["items"]
+        self.assertTrue(len(items) >= 2, "Expected at least 2 items in response")
+
+        # Find positions
+        ids = [i["product_id"] for i in items]
+        self.assertIn("T4_LEATHER_ARMOR", ids)
+
+        leather_idx = ids.index("T4_LEATHER_ARMOR")
+        # All items without volume should come after T4_LEATHER_ARMOR
+        for idx, pid in enumerate(ids):
+            if pid != "T4_LEATHER_ARMOR":
+                self.assertGreater(
+                    idx,
+                    leather_idx,
+                    f"{pid} (no volume) should appear after T4_LEATHER_ARMOR (has volume)",
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

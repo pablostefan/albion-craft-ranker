@@ -197,10 +197,17 @@ def rank_items(
         )
 
     profit_norm = _normalize([r.profit for r in ranked])
-    vol_norm = _normalize([r.volume_score for r in ranked])
+    vol_log_norm = _normalize([math.log1p(r.volume_score) for r in ranked])
+
+    _EPSILON = 0.01
+    total_w = profit_weight + volume_weight
+    pw = profit_weight / total_w if total_w > _EPSILON else 0.5
+    vw = volume_weight / total_w if total_w > _EPSILON else 0.5
 
     for i, item in enumerate(ranked):
-        item.final_score = profit_weight * profit_norm[i] + volume_weight * vol_norm[i]
+        p = max(profit_norm[i], _EPSILON)
+        v = max(vol_log_norm[i], _EPSILON)
+        item.final_score = (p ** pw) * (v ** vw)
 
     ranked.sort(key=lambda x: (x.final_score, x.profit, x.volume_score), reverse=True)
     return ranked
@@ -596,23 +603,37 @@ def rank_items_v2(
         return []
 
     # ── 8. Normalize components and compute final_score ───────────────────
+    #
+    # Weighted geometric mean: final = profit_composite^(1-α) × volume^α
+    # where α = volume_weight.  Both profit AND volume must be present for
+    # a high score — if the item doesn't sell, the score collapses.
+    #
+    # Volume is log-compressed before normalizing so that a single
+    # extremely-traded item doesn't push everyone else to ≈0.
+    # ──────────────────────────────────────────────────────────────────────
+    _EPSILON = 0.01
+
     rr_norm = _normalize([s.return_rate_pct for s in scored])
     pf_norm = _normalize([s.profit_per_focus for s in scored])
-    vol_norm = _normalize([s.volume_score for s in scored])
-    # freshness_score is already in [0, 1]; no normalization needed
+    vol_log_norm = _normalize([math.log1p(s.volume_score) for s in scored])
+
+    non_vol_weight = 1.0 - config.volume_weight  # profit + focus + freshness
 
     for i, item in enumerate(scored):
-        item.volume_norm = vol_norm[i]
-        additive_score = (
-            config.profit_weight * rr_norm[i]
-            + config.focus_weight * pf_norm[i]
-            + config.volume_weight * vol_norm[i]
-            + config.freshness_weight * item.freshness_score
-        )
-        # Multiplicative volume gate: low-volume items are severely
-        # penalised regardless of profit. Floor of 0.10 avoids total zeroing.
-        vol_gate = 0.10 + 0.90 * vol_norm[i]
-        item.final_score = additive_score * vol_gate
+        item.volume_norm = vol_log_norm[i]
+
+        if non_vol_weight > _EPSILON:
+            profit_composite = (
+                config.profit_weight * rr_norm[i]
+                + config.focus_weight * pf_norm[i]
+                + config.freshness_weight * item.freshness_score
+            ) / non_vol_weight
+        else:
+            profit_composite = 1.0  # volume-only configuration
+
+        p = max(profit_composite, _EPSILON)
+        v = max(vol_log_norm[i], _EPSILON)
+        item.final_score = (p ** non_vol_weight) * (v ** config.volume_weight)
 
     scored.sort(
         key=lambda x: (x.final_score, x.return_rate_pct, x.profit_absolute),
