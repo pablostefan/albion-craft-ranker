@@ -1,6 +1,7 @@
 """GET /items and GET /items/{item_id} endpoints."""
 from __future__ import annotations
 
+import re
 from dataclasses import replace as _replace
 from typing import Annotated
 
@@ -29,9 +30,9 @@ def _get_state(request: Request) -> AppState:
 
 
 def _scored_items(
-    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None, exclude_cities: frozenset[str] = frozenset(), use_focus: bool = False,
+    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None, exclude_cities: frozenset[str] = frozenset(), use_focus: bool = False, volumes_map: dict[str, float] | None = None,
 ) -> list[ScoredItem]:
-    use_cache = config_override is None
+    use_cache = config_override is None and volumes_map is None
     cfg = config_override if config_override is not None else state.config
 
     if use_cache:
@@ -50,6 +51,7 @@ def _scored_items(
         sell_city=sell_city,
         exclude_cities=exclude_cities,
         use_focus=use_focus,
+        volumes_map=volumes_map,
     )
 
     # rank_items_v2 already returns items sorted by final_score descending.
@@ -87,6 +89,7 @@ def list_items(
     w_volume: float | None = Query(None, ge=0, le=1),
     w_freshness: float | None = Query(None, ge=0, le=1),
     use_focus: bool = Query(False, description="Whether to include focus cost in profit calculations"),
+    name_search: str | None = Query(None, alias="q"),
 ) -> ItemsResponse:
     state = _get_state(request)
 
@@ -97,6 +100,7 @@ def list_items(
     if any(w is not None for w in custom_weights):
         config_override = _replace(
             state.config,
+            quality=quality if quality is not None else state.config.quality,
             profit_weight=w_profit if w_profit is not None else state.config.profit_weight,
             focus_weight=w_focus if w_focus is not None else state.config.focus_weight,
             volume_weight=w_volume if w_volume is not None else state.config.volume_weight,
@@ -125,12 +129,15 @@ def list_items(
         filtered = [i for i in filtered if _matches_enchantment(i, enchantment, state)]
     if min_profit is not None:
         filtered = [i for i in filtered if i.profit_absolute >= min_profit]
+    if name_search:
+        ns_lower = name_search.lower()
+        filtered = [i for i in filtered if ns_lower in i.display_name.lower()]
 
     # Re-sort after filtering
     descending = order == "desc"
 
     # Helper: fetch daily volumes via history API for a list of items
-    def _fetch_volumes(item_list: list[ScoredItem]) -> dict[str, float | None]:
+    def _fetch_volumes(item_list: list[ScoredItem], quality: int = 1) -> dict[str, float | None]:
         vols: dict[str, float | None] = {}
         if not item_list:
             return vols
@@ -139,7 +146,7 @@ def list_items(
             client = AlbionAPIClient()
             all_ids = [i.product_id for i in item_list]
             for batch in _chunk(all_ids, 100):
-                history = client.get_history_bulk(batch, sell_location, quality=1, days=7)
+                history = client.get_history_bulk(batch, sell_location, quality=quality, days=7)
                 for pid in batch:
                     rows = history.get(pid, [])
                     data_points: list[dict] = []
@@ -154,12 +161,22 @@ def list_items(
     # When sorting by daily_volume, fetch volumes for ALL filtered items first
     volumes: dict[str, float | None] = {}
     if sort_by == "daily_volume":
-        volumes = _fetch_volumes(filtered)
+        volumes = _fetch_volumes(filtered, quality=quality or 1)
+        _vol_map = {k: v for k, v in volumes.items() if v is not None}
+        if _vol_map:
+            _rescored = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override, exclude_cities=excluded, use_focus=use_focus, volumes_map=_vol_map)
+            _valid = {i.product_id for i in filtered}
+            filtered = [i for i in _rescored if i.product_id in _valid]
         filtered.sort(key=lambda x: volumes.get(x.product_id) or 0.0, reverse=descending)
     elif sort_by == "profit":
         filtered.sort(key=lambda x: x.profit_absolute, reverse=descending)
     elif sort_by == "final_score":
-        volumes = _fetch_volumes(filtered)
+        volumes = _fetch_volumes(filtered, quality=quality or 1)
+        _vol_map = {k: v for k, v in volumes.items() if v is not None}
+        if _vol_map:
+            _rescored = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override, exclude_cities=excluded, use_focus=use_focus, volumes_map=_vol_map)
+            _valid = {i.product_id for i in filtered}
+            filtered = [i for i in _rescored if i.product_id in _valid]
         filtered.sort(
             key=lambda x: ((volumes.get(x.product_id) or 0) > 0, x.final_score),
             reverse=descending,
@@ -174,7 +191,7 @@ def list_items(
 
     # For non-volume sorts, fetch volumes only for the current page
     if sort_by not in ("daily_volume", "final_score"):
-        volumes = _fetch_volumes(page)
+        volumes = _fetch_volumes(page, quality=quality or 1)
 
     return ItemsResponse(
         items=[ScoredItemSchema(**{**_item_dict(i), "daily_volume": volumes.get(i.product_id)}) for i in page],
@@ -214,7 +231,9 @@ def get_item(
     if target is None:
         raise HTTPException(404, f"Item not found: {item_id}")
 
-    recipe = state.get_recipe(item_id)
+    _enc_match = re.search(r"@(\d)", item_id)
+    _enchantment = int(_enc_match.group(1)) if _enc_match else 0
+    recipe = state.get_recipe(item_id.split("@")[0], enchantment=_enchantment)
     cost_breakdown: list[MaterialCost] = []
     optimized_material_cost: float | None = None
     optimized_profit: float | None = None
@@ -334,21 +353,17 @@ def _item_dict(item: ScoredItem) -> dict:
         "bm_net_revenue": item.bm_net_revenue,
         "bm_profit": item.bm_profit,
         "bm_return_rate_pct": item.bm_return_rate_pct,
+        "display_name": item.display_name,
     }
 
 
 def _matches_category(item: ScoredItem, category: str, state: AppState) -> bool:
-    recipe = state.get_recipe(item.product_id)
-    if recipe is None:
-        return False
-    return recipe.category == category
+    return any(r.category == category for r in state.recipes if r.product_id == item.product_id)
 
 
 def _matches_tier(item: ScoredItem, tier: int, state: AppState) -> bool:
-    recipe = state.get_recipe(item.product_id)
-    return recipe is not None and recipe.tier == tier
+    return any(r.tier == tier for r in state.recipes if r.product_id == item.product_id)
 
 
 def _matches_enchantment(item: ScoredItem, enchantment: int, state: AppState) -> bool:
-    recipe = state.get_recipe(item.product_id)
-    return recipe is not None and recipe.enchantment == enchantment
+    return any(r.enchantment == enchantment for r in state.recipes if r.product_id == item.product_id)

@@ -2,6 +2,7 @@
 
 export interface ScoredItem {
   product_id: string;
+  display_name: string;
   craft_city: string;
   sell_mode: string;
   material_cost: number;
@@ -115,4 +116,5 @@ export interface ItemsQueryParams {
   w_freshness?: number;
   exclude_cities?: string;
   use_focus?: boolean;
+  name_search?: string;
 }

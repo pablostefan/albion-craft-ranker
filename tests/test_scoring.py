@@ -695,5 +695,43 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(result, [])
 
 
+class TestRankItemsV2VolumesMap(unittest.TestCase):
+    def test_volumes_map_sets_volume_score(self) -> None:
+        """volumes_map values are stored as volume_score on the resulting ScoredItem."""
+        recipe = _recipe("T4_CLOTH_ARMOR")
+        prices = [
+            _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
+            _mp("T4_CLOTH_ARMOR", "Lymhurst", sell_min=25000.0, buy_max=20000.0),
+        ]
+        results = rank_items_v2(
+            recipes=[recipe],
+            prices=prices,
+            city_bonuses=None,
+            config=_cfg(),
+            craft_city="Lymhurst",
+            volumes_map={"T4_CLOTH_ARMOR": 9999.0},
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].volume_score, 9999.0)
+
+    def test_volumes_map_none_falls_back_to_buy_price_max(self) -> None:
+        """Without volumes_map, volume_score is set from buy_price_max."""
+        recipe = _recipe("T4_CLOTH_ARMOR")
+        prices = [
+            _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
+            _mp("T4_CLOTH_ARMOR", "Lymhurst", sell_min=25000.0, buy_max=20000.0),
+        ]
+        results = rank_items_v2(
+            recipes=[recipe],
+            prices=prices,
+            city_bonuses=None,
+            config=_cfg(),
+            craft_city="Lymhurst",
+            volumes_map=None,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].volume_score, 20000.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,7 @@ class ScoringConfig:
     Pesos devem somar 1.0; validado em __post_init__.
     """
 
+    quality: int = 1
     setup_fee_rate: float = 0.025
     premium_tax_rate: float = 0.04
     normal_tax_rate: float = 0.08
@@ -103,3 +104,4 @@ class ScoredItem:
     bm_net_revenue: float | None = None
     bm_profit: float | None = None
     bm_return_rate_pct: float | None = None
+    display_name: str = ""

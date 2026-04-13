@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 from .albion_client import AlbionAPIClient, MarketPrice
+from .item_names import format_item_id
 from .models import Material, Recipe, ScoredItem, ScoringConfig
 from .rrr_engine import SUPPORTED_CITIES, get_effective_material_cost
 
@@ -401,6 +402,7 @@ def rank_items_v2(
     quality: int = 1,
     staleness_cap_hours: float = 48.0,
     exclude_cities: frozenset[str] = frozenset(),
+    volumes_map: dict[str, float] | None = None,
 ) -> List[ScoredItem]:
     """Motor de ranqueamento v2.
 
@@ -494,7 +496,7 @@ def rank_items_v2(
                 sales_tax = total_sell * config.sales_tax_rate
                 net_revenue = total_sell - sales_tax
                 freshness_hours = mp_sell.staleness_hours
-                volume = max(mp_sell.buy_price_max, 0.0)
+                volume = (volumes_map or {}).get(recipe.product_id) or max(mp_sell.buy_price_max, 0.0)
 
         if sell_mode == "black_market":
             if mp_bm is None or mp_bm.buy_price_max <= 0:
@@ -504,7 +506,7 @@ def rank_items_v2(
             sales_tax = total_sell * config.sales_tax_rate
             net_revenue = total_sell - sales_tax
             freshness_hours = mp_bm.staleness_hours
-            volume = sell_price
+            volume = (volumes_map or {}).get(recipe.product_id) or sell_price
 
         # For comparison mode, skip entirely if neither source has revenue
         if sell_mode == "comparison" and net_revenue <= 0:
@@ -596,6 +598,7 @@ def rank_items_v2(
                 bm_net_revenue=bm_net_revenue,
                 bm_profit=bm_profit,
                 bm_return_rate_pct=bm_return_rate_pct,
+                display_name=format_item_id(recipe.product_id),
             )
         )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -93,7 +94,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
         allow_methods=["*"],
         allow_headers=["*"],
     )

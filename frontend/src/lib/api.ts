@@ -60,6 +60,7 @@ export function fetchItems(params: ItemsQueryParams = {}): Promise<ItemsResponse
   if (params.w_freshness !== undefined) query.w_freshness = String(params.w_freshness);
   if (params.exclude_cities) query.exclude_cities = params.exclude_cities;
   if (params.use_focus) query.use_focus = String(params.use_focus);
+  if (params.name_search) query.q = params.name_search;
   return request<ItemsResponse>("/items", query);
 }
 

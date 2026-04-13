@@ -493,5 +493,39 @@ class TestCORS(unittest.TestCase):
         self.assertEqual(resp.headers["access-control-allow-origin"], "http://localhost:3000")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Name search (?q=)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestListItemsNameSearch(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = _make_client()
+
+    def test_q_filter_returns_only_matching_display_names(self) -> None:
+        """?q=leather returns only items whose display_name contains 'leather' (case-insensitive)."""
+        resp = self.client.get("/items", params={"q": "leather"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertGreater(len(body["items"]), 0)
+        for item in body["items"]:
+            self.assertIn("leather", item["display_name"].lower())
+
+    def test_q_filter_excludes_non_matching_items(self) -> None:
+        """?q=cloth should not return leather items."""
+        resp = self.client.get("/items", params={"q": "cloth"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        for item in body["items"]:
+            self.assertNotIn("leather", item["display_name"].lower())
+
+    def test_q_filter_empty_result_for_no_match(self) -> None:
+        """?q= with a term that matches nothing returns empty items list."""
+        resp = self.client.get("/items", params={"q": "zzznomatchzzz"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["items"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

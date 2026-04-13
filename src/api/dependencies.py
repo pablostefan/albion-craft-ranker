@@ -26,7 +26,7 @@ class AppState:
     _recipe_index: dict[str, Recipe] = field(default_factory=dict, repr=False)
 
     def build_recipe_index(self) -> None:
-        self._recipe_index = {r.product_id: r for r in self.recipes}
+        self._recipe_index = {f"{r.product_id}@{r.enchantment}": r for r in self.recipes}
 
-    def get_recipe(self, product_id: str) -> Recipe | None:
-        return self._recipe_index.get(product_id)
+    def get_recipe(self, product_id: str, enchantment: int = 0) -> Recipe | None:
+        return self._recipe_index.get(f"{product_id}@{enchantment}")

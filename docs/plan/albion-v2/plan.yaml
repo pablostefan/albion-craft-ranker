@@ -1,0 +1,948 @@
+plan_id: albion-v2
+objective: >
+  Fix 3 confirmed bugs (volume_score proxy, recipe_index key collision, CORS hardcoding)
+  and add 3 features (item name parser + display_name field, search-by-name endpoint + UI,
+  quality param backend + frontend) across the albion-craft-ranker Python/FastAPI backend
+  and Next.js/TypeScript frontend.
+created_at: "2026-04-13T00:00:00Z"
+created_by: gem-planner
+status: pending
+research_confidence: high
+
+plan_metrics:
+  wave_1_task_count: 4
+  total_dependencies: 13
+  risk_score: low
+
+tldr: |
+  10-task plan in 3 waves.
+
+  Wave 1 (4 parallel tasks): Fixes all 3 confirmed bugs — volume_score uses buy_price_max
+  as proxy instead of real daily volume; recipe_index loses enchantment variants due to
+  key collision; CORS origin is hardcoded. Also creates the standalone item name parser
+  module (src/item_names.py). Tasks can run fully in parallel except task-01 and task-02
+  which both touch items.py (serial via conflicts_with).
+
+  Wave 2 (3 serial tasks, shared file deps): Wires display_name into the full schema
+  stack (models → schemas → TS types); adds the ?q= search-by-name filter to GET /items;
+  threads the quality parameter from ScoringConfig through the refresh background task,
+  POST /refresh body, and GET /items route. Serial due to shared models.py and items.py.
+
+  Wave 3 (2 frontend tasks + 1 test task, partially parallel): Adds debounced search input
+  to FilterSidebar; finishes quality selector UI (constant already defined, just needs
+  wiring); adds ~15 new test cases covering all changed behavior. Frontend tasks are serial
+  (same files); test task is independent and can run in parallel with frontend work.
+
+open_questions:
+  - "format_item_id: should items with no T{n} prefix (e.g. JOURNAL_NOVICE) return raw id or a cleaned fallback?"
+  - "quality param in ScoringConfig: is quality a persistent global setting (PUT /config) or per-request-only override?"
+  - "Does background _refresh_prices need quality=config.quality or should it always use quality=1 for broadest price coverage?"
+
+pre_mortem:
+  overall_risk_level: low
+  critical_failure_modes:
+    - scenario: >
+        Changing get_recipe() signature from get_recipe(product_id) to
+        get_recipe(product_id, enchantment=0) breaks the get_item detail endpoint
+        if there are un-updated call sites.
+      likelihood: medium
+      impact: high
+      mitigation: >
+        Audit all occurrences of state.get_recipe() in the codebase before changing
+        the signature. Update all call sites atomically in task-02. Run full pytest
+        suite immediately after.
+    - scenario: >
+        ScoringConfig.__post_init__ already validates that profit+focus+volume+freshness
+        weights sum to 1.0. Adding a quality: int = 1 field must not disturb that check.
+      likelihood: low
+      impact: high
+      mitigation: >
+        quality field is an independent integer (not a weight), so __post_init__ weight
+        sum check is unaffected. Verify by reading the validator before patching.
+    - scenario: >
+        rank_items_v2 is also called from tests (test_scoring.py) without volumes_map.
+        New parameter must be keyword-only with default None.
+      likelihood: low
+      impact: medium
+      mitigation: >
+        Use volumes_map: dict[str, float] | None = None as keyword arg after the *
+        separator that already exists in the signature. All existing positional callers
+        are unaffected.
+  assumptions:
+    - All 111 existing tests pass before any changes are applied.
+    - ".env.example" does not yet exist at project root (confirmed via file search).
+    - get_recipe() is currently only called in src/api/routes/items.py (needs audit in task-02).
+    - quality param already exists in rank_items_v2 signature but is unused in the call path.
+    - FilterSidebar.tsx already defines QUALITY_OPTIONS constant (confirmed in code read).
+    - frontend/src/lib/api.ts already maps params.quality → query.quality (confirmed).
+    - frontend/src/lib/types.ts already has quality?: number in ItemsQueryParams (confirmed).
+
+implementation_specification:
+  code_structure: |
+    New file:
+      src/item_names.py — pure function module, no project imports.
+
+    Modified backend files:
+      src/scoring.py           — add volumes_map param to rank_items_v2; import format_item_id;
+                                  populate display_name on each ScoredItem.
+      src/models.py            — add display_name: str = "" to ScoredItem;
+                                  add quality: int = 1 to ScoringConfig.
+      src/api/app.py           — env-based CORS; _refresh_prices reads config.quality.
+      src/api/dependencies.py  — compound key in build_recipe_index; updated get_recipe signature.
+      src/api/schemas.py       — add display_name: str = "" to ScoredItemSchema.
+      src/api/routes/items.py  — pass volumes_map to rank_items_v2; add ?q= filter;
+                                  pass quality from config; update get_recipe call sites.
+      src/api/routes/refresh.py — accept optional quality in request body.
+
+    Modified frontend files:
+      frontend/src/lib/types.ts           — add display_name: string to ScoredItem;
+                                             add name_search?: string to ItemsQueryParams.
+      frontend/src/lib/api.ts             — map name_search → query param q in fetchItems().
+      frontend/src/components/FilterSidebar.tsx — add debounced search input; add quality selector.
+      frontend/src/app/page.tsx           — bind URL params q and quality.
+
+    New test files:
+      tests/test_item_names.py — unit tests for format_item_id().
+
+    Modified test files:
+      tests/test_scoring.py — rank_items_v2 volumes_map tests.
+      tests/test_api.py     — search filter tests, compound key tests, quality param tests.
+
+  affected_areas:
+    - "src/scoring.py — rank_items_v2 volume_score logic and ScoredItem construction"
+    - "src/models.py — ScoredItem dataclass, ScoringConfig dataclass"
+    - "src/api/app.py — CORSMiddleware config, _refresh_prices quality wiring"
+    - "src/api/dependencies.py — _recipe_index build and get_recipe lookup"
+    - "src/api/schemas.py — ScoredItemSchema Pydantic model"
+    - "src/api/routes/items.py — list_items filtering, sorting, volumes, search param"
+    - "src/api/routes/refresh.py — quality body param"
+    - "src/item_names.py — new module"
+    - "frontend/src/lib/types.ts — ScoredItem and ItemsQueryParams interfaces"
+    - "frontend/src/lib/api.ts — fetchItems query builder"
+    - "frontend/src/components/FilterSidebar.tsx — search input, quality selector"
+    - "frontend/src/app/page.tsx — URL param q and quality read/write"
+
+  component_details:
+    - component: "format_item_id (src/item_names.py)"
+      responsibility: >
+        Convert raw Albion item IDs (e.g. T4_SWORD@1, T6_ARMOR_LEATHER_SET3) into
+        human-readable names (e.g. "Sword T4 +1", "Leather Armor T6 .3").
+        Pure function, no I/O, no project imports.
+      interfaces:
+        - "format_item_id(item_id: str) -> str"
+
+    - component: "rank_items_v2 (src/scoring.py)"
+      responsibility: >
+        Score and rank craftable items. Accept optional volumes_map to replace
+        buy_price_max proxy with real daily volume. Populate display_name on each
+        ScoredItem using format_item_id.
+      interfaces:
+        - "rank_items_v2(recipes, prices, city_bonuses, config, *, volumes_map: dict[str, float] | None = None, ...) -> list[ScoredItem]"
+
+    - component: "AppState.get_recipe (src/api/dependencies.py)"
+      responsibility: >
+        Fast O(1) lookup of Recipe by compound key product_id + enchantment.
+        Preserves all enchantment variants (T4@1, T4@2, T4@3) independently.
+      interfaces:
+        - "build_recipe_index(self) -> None  # key: f'{product_id}@{enchantment}'"
+        - "get_recipe(self, product_id: str, enchantment: int = 0) -> Recipe | None"
+
+    - component: "GET /items route (src/api/routes/items.py)"
+      responsibility: >
+        List scored items with filtering, sorting, pagination.
+        New: accepts ?q= substring search on display_name; passes quality and
+        volumes_map through to rank_items_v2.
+      interfaces:
+        - "GET /items?q=<str>&quality=<1-5>&city=<str>&..."
+
+  dependencies:
+    - component: task-05 (display_name)
+      relationship: depends on task-04; format_item_id must exist before scoring.py imports it
+    - component: task-06 (search route)
+      relationship: depends on task-05; display_name must be in ScoredItem before route filters on it; also depends on task-02 for compound key
+    - component: task-07 (quality backend)
+      relationship: depends on task-06 to avoid simultaneous items.py edits; models.py conflict with task-05 handled by serial ordering
+    - component: task-08 (search frontend)
+      relationship: depends on task-06; backend must return display_name and accept ?q=
+    - component: task-09 (quality frontend)
+      relationship: depends on task-07 and task-08; backend must accept quality; same frontend files as task-08
+
+  integration_points:
+    - "GET /items response now includes display_name; frontend ScoredItem TS interface updated in task-05"
+    - "rank_items_v2 signature is backward-compatible (volumes_map defaults to None)"
+    - "AppState.get_recipe signature change requires audit of all call sites before task-02 lands"
+    - "_fetch_volumes in items.py will use config.quality instead of hardcoded 1 after task-07"
+
+contracts:
+  - from_task: task-04
+    to_task: task-05
+    interface: "format_item_id(item_id: str) -> str exported from src/item_names.py"
+    format: Python importable module at src.item_names
+
+  - from_task: task-05
+    to_task: task-06
+    interface: "ScoredItem.display_name: str populated by rank_items_v2 for all scored items"
+    format: Python dataclass field with default ""
+
+  - from_task: task-02
+    to_task: task-06
+    interface: "AppState.get_recipe(product_id, enchantment=0) with compound key backing store"
+    format: updated method signature
+
+  - from_task: task-06
+    to_task: task-08
+    interface: "GET /items?q=<str> filters by display_name substring (case-insensitive)"
+    format: JSON response includes display_name field on each item
+
+  - from_task: task-07
+    to_task: task-09
+    interface: "GET /items?quality=<int> and POST /refresh {quality: int} accepted and used"
+    format: HTTP API contract; frontend passes quality as query param
+
+tasks:
+  # ─────────────────────────────────────────────────────────────────────────
+  # WAVE 1 — Backend Foundation (parallel, except task-01 ↔ task-02 on items.py)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: task-01
+    title: "Bug 1: Fix volume_score — pass real daily volumes into rank_items_v2"
+    description: |
+      In src/scoring.py, rank_items_v2 step 3 assigns:
+        volume = max(mp_sell.buy_price_max, 0.0)
+      This uses buy-order pressure as a volume proxy. Real daily volume is fetched via
+      _fetch_volumes() in list_items() but is never passed into the scoring function.
+
+      Changes:
+      1. src/scoring.py — add keyword parameter to rank_items_v2:
+           volumes_map: dict[str, float] | None = None
+         In the per-recipe loop, replace the volume assignment with:
+           volume = (volumes_map or {}).get(recipe.product_id) or max(mp_sell.buy_price_max, 0.0)
+         This gracefully falls back to buy_price_max when the map is absent or missing a key.
+
+      2. src/api/routes/items.py — in list_items(), the _fetch_volumes() helper already
+         fetches real volumes when sort_by is "daily_volume" or "final_score". For those
+         paths, pass the pre-fetched volumes dict to rank_items_v2 via volumes_map= so
+         scoring reflects real volume. For all other sort_by values, volumes_map=None
+         preserves existing behavior.
+
+      Files changed: src/scoring.py, src/api/routes/items.py
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - bug-1
+    priority: high
+    status: pending
+    dependencies: []
+    conflicts_with:
+      - task-02
+    context_files:
+      - path: src/scoring.py
+        description: rank_items_v2 function; step 3 volume assignment around line 590; existing keyword-arg section after the * separator
+      - path: src/api/routes/items.py
+        description: list_items endpoint; _fetch_volumes helper; sort_by branching logic; rank_items_v2 call site
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 2
+        estimated_lines: 15
+        focus_area: scoring pipeline — volume_score computation
+        verification:
+          - rank_items_v2 accepts volumes_map without breaking existing callers (default None)
+          - When volumes_map is provided, volume_score reflects those values not buy_price_max
+          - Fallback to buy_price_max when key absent from volumes_map
+          - list_items passes pre-fetched volumes to rank_items_v2 for final_score/daily_volume sort paths
+        acceptance_criteria:
+          - volumes_map param added to rank_items_v2 with keyword-only default None
+          - volume computed as volumes_map.get(id) or buy_price_max inside loop
+          - list_items passes volumes dict when sort_by in ("daily_volume", "final_score")
+          - All existing rank_items_v2 call signatures remain valid
+        failure_modes:
+          - scenario: volumes_map passed with stale or partial data misrepresents some items
+            likelihood: low
+            impact: medium
+            mitigation: >
+              Fall back to buy_price_max for any missing key; stale volumes degrade gracefully
+              rather than blocking the response.
+        tech_stack:
+          - Python 3.11
+          - FastAPI
+        test_coverage: Added in task-10 (test_scoring.py)
+
+  - id: task-02
+    title: "Bug 2: Fix recipe_index — use compound key for enchantment variants"
+    description: |
+      In src/api/dependencies.py, build_recipe_index() uses:
+        self._recipe_index = {r.product_id: r for r in self.recipes}
+      Items with multiple enchantment levels (T4@1, T4@2, T4@3) share the same product_id
+      base string, so all but the last recipe are silently discarded (last-write-wins).
+
+      Changes:
+      1. src/api/dependencies.py:
+         - Change build_recipe_index to use compound key:
+             self._recipe_index = {f"{r.product_id}@{r.enchantment}": r for r in self.recipes}
+         - Update get_recipe signature to:
+             def get_recipe(self, product_id: str, enchantment: int = 0) -> Recipe | None:
+                 return self._recipe_index.get(f"{product_id}@{enchantment}")
+         Default enchantment=0 keeps the base-recipe lookup backward-compatible.
+
+      2. src/api/routes/items.py — audit all call sites of state.get_recipe().
+         The get_item detail endpoint extracts enchantment from the product_id
+         (e.g. "T4_SWORD@1" → enchantment=1). Pass enchantment argument to get_recipe.
+         If enchantment cannot be parsed, pass 0 as safe fallback.
+
+      Files changed: src/api/dependencies.py, src/api/routes/items.py
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - bug-2
+    priority: high
+    status: pending
+    dependencies: []
+    conflicts_with:
+      - task-01
+    context_files:
+      - path: src/api/dependencies.py
+        description: AppState class; build_recipe_index method; get_recipe method; _recipe_index field
+      - path: src/api/routes/items.py
+        description: All call sites of state.get_recipe(); get_item detail endpoint enchantment extraction
+      - path: src/models.py
+        description: Recipe dataclass with enchantment: int field
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 2
+        estimated_lines: 20
+        focus_area: data indexing — recipe lookup by compound key
+        verification:
+          - build_recipe_index stores all enchantment variants as separate entries
+          - get_recipe("T4_SWORD", 1) and get_recipe("T4_SWORD", 2) return distinct Recipe objects
+          - get_recipe("T4_SWORD") with no enchantment uses default 0 (base recipe)
+          - All existing test_api.py tests still pass
+        acceptance_criteria:
+          - Compound key f"{product_id}@{enchantment}" used in build_recipe_index
+          - get_recipe signature updated to accept enchantment: int = 0
+          - All call sites in items.py updated to pass enchantment where available
+          - T4@1, T4@2, T4@3 variants all independently retrievable
+        failure_modes:
+          - scenario: get_item detail endpoint passes wrong enchantment, returning wrong recipe
+            likelihood: medium
+            impact: medium
+            mitigation: >
+              Parse enchantment from product_id string using regex r"@(\d)" before calling
+              get_recipe; fall back to enchantment=0 if no suffix found.
+        tech_stack:
+          - Python 3.11
+          - FastAPI
+        test_coverage: Added in task-10 (test_api.py)
+
+  - id: task-03
+    title: "Bug 3: Replace hardcoded CORS origin with CORS_ORIGINS environment variable"
+    description: |
+      In src/api/app.py, CORSMiddleware is configured with:
+        allow_origins=["http://localhost:3000"]
+      This blocks all staging and production deployments without a code change.
+
+      Changes:
+      1. src/api/app.py:
+         - Add import os near the top (after existing stdlib imports).
+         - Replace the hardcoded list:
+             allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+           Comma-separated values allow multiple origins.
+
+      2. Create .env.example at project root:
+           # Comma-separated list of allowed CORS origins
+           CORS_ORIGINS=http://localhost:3000
+
+      Files changed: src/api/app.py, .env.example (new)
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - bug-3
+    priority: medium
+    status: pending
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: src/api/app.py
+        description: create_app function; CORSMiddleware configuration block (~line 94)
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 2
+        estimated_lines: 6
+        focus_area: deployment configuration — CORS env var
+        verification:
+          - CORS_ORIGINS env var controls allowed origins at runtime
+          - Default value "http://localhost:3000" preserves existing dev behavior when var unset
+          - Multiple origins work when CORS_ORIGINS="http://a.com,http://b.com"
+          - .env.example documents the variable with a comment
+        acceptance_criteria:
+          - allow_origins reads from os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+          - .env.example created at project root with CORS_ORIGINS documented
+          - No hardcoded origin strings remain in app.py
+        failure_modes: []
+        tech_stack:
+          - Python 3.11
+          - FastAPI
+        test_coverage: null
+
+  - id: task-04
+    title: "Feature: Create src/item_names.py with format_item_id() parser"
+    description: |
+      Create a new standalone module src/item_names.py containing a single pure function.
+
+      format_item_id(item_id: str) -> str
+      Parser rules (applied in order):
+        1. Check for @N enchantment suffix: match r"@(\d+)$"; extract N, remove from string.
+        2. Check for tier prefix: match r"^T(\d)_"; extract tier digit, remove prefix.
+        3. Expand known keyword tokens (split remaining string by "_"):
+             SWORD→Sword, BOW→Bow, ARMOR→Armor, LEATHER→Leather, PLATE→Plate,
+             CLOTH→Cloth, HEAD→Head, SHOES→Shoes, CAPE→Cape, BAG→Bag,
+             OFF→Off, SHIELD→Shield, SET→(silent — indicates variant, shown as .N),
+             MORGANA→Morgana, KEEPER→Keeper, HERETIC→Heretic, etc.
+           Numeric-only tokens from SET{N} patterns become ".{N}" variant suffix.
+        4. Assemble result: "{expanded_name} T{tier}" + optional " +{N}" enchant suffix.
+           SET variant becomes ".{N}" appended to tier instead: "T{tier}.{N}" or at end.
+        5. Fallback: if no tier found, return title-cased expansion of tokens.
+           If no expansion found at all, return raw item_id unchanged.
+
+      Example outputs:
+        T4_SWORD@1         → "Sword T4 +1"
+        T6_ARMOR_LEATHER_SET3 → "Leather Armor T6 .3"
+        T5_BOW             → "Bow T5"
+        UNKNOWN_ITEM       → "UNKNOWN_ITEM"
+
+      The function must have NO imports from other project modules (pure utility).
+
+      Files changed: src/item_names.py (new)
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-names
+    priority: medium
+    status: pending
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: data/items.json
+        description: Sample item IDs to verify parser coverage — scan first 30 unique IDs for patterns
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 1
+        estimated_lines: 65
+        focus_area: item name parsing — pure utility module
+        verification:
+          - format_item_id("T4_SWORD@1") returns "Sword T4 +1"
+          - format_item_id("T6_ARMOR_LEATHER_SET3") returns "Leather Armor T6 .3"
+          - format_item_id("T5_BOW") returns "Bow T5"
+          - format_item_id("UNKNOWN_ITEM") returns "UNKNOWN_ITEM" (fallback)
+          - No imports from src.models, src.scoring, or any other project module
+        acceptance_criteria:
+          - format_item_id() exported from src/item_names.py
+          - Tier extraction (T4..T8) handled
+          - Enchantment extraction (@1..@4) handled, rendered as " +N"
+          - SET{N} variant rendered as " .N" appended after tier
+          - Unknown tokens title-cased; unrecognized IDs returned as-is
+          - Module importable as `from src.item_names import format_item_id`
+        failure_modes:
+          - scenario: New Albion game update introduces ID patterns not covered by parser
+            likelihood: medium
+            impact: low
+            mitigation: Fallback always returns raw item_id — safe degradation, never raises
+        tech_stack:
+          - Python 3.11
+          - re (stdlib only)
+        test_coverage: Added in task-10 (tests/test_item_names.py new)
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # WAVE 2 — Backend Integration (serial due to shared models.py + items.py)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: task-05
+    title: "Feature: Add display_name to ScoredItem, ScoredItemSchema, and TS interface"
+    description: |
+      Wire the format_item_id parser into the scoring pipeline and expose display_name
+      through all schema layers so the frontend can display readable names and filter on them.
+
+      Changes:
+      1. src/models.py — add field to ScoredItem dataclass (NOT frozen, so mutable default ok):
+           display_name: str = ""
+
+      2. src/api/schemas.py — add field to ScoredItemSchema Pydantic model:
+           display_name: str = ""
+
+      3. src/scoring.py — add import at top:
+           from .item_names import format_item_id
+         In rank_items_v2, after constructing each ScoredItem, set:
+           item.display_name = format_item_id(recipe.product_id)
+         (ScoredItem is not frozen, so direct attribute assignment works.)
+
+      4. frontend/src/lib/types.ts — add field to ScoredItem interface:
+           display_name: string;
+
+      Files changed: src/models.py, src/api/schemas.py, src/scoring.py, frontend/src/lib/types.ts
+    wave: 2
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-names
+      - feat-search
+    priority: medium
+    status: pending
+    dependencies:
+      - task-04
+    conflicts_with:
+      - task-07
+    context_files:
+      - path: src/models.py
+        description: ScoredItem dataclass; confirm slots=True but NOT frozen
+      - path: src/api/schemas.py
+        description: ScoredItemSchema Pydantic model; all existing fields
+      - path: src/scoring.py
+        description: rank_items_v2 ScoredItem construction site; existing imports block
+      - path: frontend/src/lib/types.ts
+        description: ScoredItem TypeScript interface
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 4
+        estimated_lines: 12
+        focus_area: schema propagation — display_name across all layers
+        verification:
+          - ScoredItem.display_name populated by rank_items_v2 for every returned item
+          - ScoredItemSchema.display_name serializes to JSON response
+          - Frontend ScoredItem TS interface includes display_name field
+          - Existing tests still pass (display_name defaults to "" if not set)
+        acceptance_criteria:
+          - display_name: str = "" added to ScoredItem dataclass in models.py
+          - display_name: str = "" added to ScoredItemSchema in schemas.py
+          - rank_items_v2 sets item.display_name = format_item_id(recipe.product_id) per item
+          - ScoredItem TS interface updated with display_name: string
+        failure_modes:
+          - scenario: ScoredItem uses slots=True which may conflict with post-construction assignment
+            likelihood: low
+            impact: medium
+            mitigation: >
+              ScoredItem dataclass is confirmed NOT frozen (slots=True is compatible with
+              attribute assignment). Verify by checking @dataclass decorator options before patching.
+        tech_stack:
+          - Python 3.11
+          - Pydantic v2
+          - TypeScript
+        test_coverage: Covered implicitly by task-10 GET /items response display_name check
+
+  - id: task-06
+    title: "Feature: Search by name — add ?q= substring filter to GET /items"
+    description: |
+      Add a case-insensitive substring search parameter to the GET /items endpoint that
+      filters scored items by their display_name field.
+
+      Changes:
+      1. src/api/routes/items.py — in list_items(), add query parameter after existing params:
+           name_search: str | None = Query(None, alias="q")
+         After the existing category / tier / enchantment / min_profit filters, add:
+           if name_search:
+               ns = name_search.strip().lower()
+               filtered = [i for i in filtered if ns in i.display_name.lower()]
+         This filter runs AFTER scoring and cache retrieval, so it is cache-friendly
+         (the cache stores the full scored list; name filtering happens on the slice).
+
+      Files changed: src/api/routes/items.py
+    wave: 2
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-search
+    priority: medium
+    status: pending
+    dependencies:
+      - task-05
+      - task-02
+    conflicts_with:
+      - task-07
+    context_files:
+      - path: src/api/routes/items.py
+        description: list_items endpoint signature; filter pipeline after scoring; placement of name_search relative to other filters
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 1
+        estimated_lines: 8
+        focus_area: endpoint filtering — name substring search
+        verification:
+          - GET /items?q=sword returns only items with "sword" (case-insensitive) in display_name
+          - GET /items?q=SWORD same result (case-insensitive)
+          - GET /items with no q parameter returns all items (no regression)
+          - Filter applied after scoring, not inside rank_items_v2
+        acceptance_criteria:
+          - name_search query param added to list_items() with alias="q" and default None
+          - Substring filter applied case-insensitively on display_name
+          - Filter placed after existing category/tier/enchantment/min_profit filters
+          - Empty string or absent q returns full item list
+        failure_modes:
+          - scenario: display_name is "" for items where format_item_id returns empty
+            likelihood: low
+            impact: low
+            mitigation: >
+              Never matches any non-empty search term, so those items are excluded from
+              search results — acceptable behavior.
+        tech_stack:
+          - Python 3.11
+          - FastAPI
+        test_coverage: Added in task-10 (test_api.py)
+
+  - id: task-07
+    title: "Feature: Quality param — thread through ScoringConfig, refresh, and items route"
+    description: |
+      The quality parameter exists in rank_items_v2 but is hardcoded to 1 in all callers.
+      Expose it as a configurable value from ScoringConfig and as an override via HTTP.
+
+      Changes:
+      1. src/models.py — add field to ScoringConfig (AFTER the existing fields, BEFORE
+         __post_init__; quality is NOT a weight so the weight-sum check is unaffected):
+           quality: int = 1
+
+      2. src/api/routes/items.py:
+         - The list_items endpoint already has quality: int | None = Query(None).
+           Update _scored_items and the rank_items_v2 call to use:
+             effective_quality = quality if quality is not None else cfg.quality
+           Pass effective_quality to rank_items_v2(... quality=effective_quality).
+         - In _fetch_volumes(), replace the hardcoded quality=1 with:
+             quality_val = getattr(cfg, "quality", 1)
+           and pass quality_val to client.get_history_bulk().
+
+      3. src/api/routes/refresh.py — add a request body model:
+           class RefreshRequest(BaseModel):
+               quality: int = 1
+         Update refresh_prices to accept an optional body:
+           async def refresh_prices(request: Request, body: RefreshRequest | None = None)
+         Use body.quality if provided, else state.config.quality, in the
+         client.get_prices() call (replace hardcoded 1).
+
+      4. src/api/app.py — in _refresh_prices(), replace hardcoded quality=1:
+           quality = getattr(state.config, "quality", 1)
+         Pass quality to client.get_prices().
+
+      Files changed: src/models.py, src/api/routes/items.py, src/api/routes/refresh.py, src/api/app.py
+    wave: 2
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-quality
+    priority: medium
+    status: pending
+    dependencies:
+      - task-06
+    conflicts_with:
+      - task-05
+    context_files:
+      - path: src/models.py
+        description: ScoringConfig dataclass; __post_init__ weight validator; add quality after existing fields
+      - path: src/api/routes/items.py
+        description: list_items quality param; _scored_items helper; _fetch_volumes helper; rank_items_v2 call
+      - path: src/api/routes/refresh.py
+        description: RefreshResponse model; refresh_prices endpoint; hardcoded quality=1 in get_prices call
+      - path: src/api/app.py
+        description: _refresh_prices background coroutine; hardcoded quality=1 in get_prices call (~line 45)
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 4
+        estimated_lines: 30
+        focus_area: quality param pipeline — config to all callers
+        verification:
+          - ScoringConfig.quality: int = 1 added without breaking weight validation
+          - GET /items?quality=3 overrides quality for that request
+          - GET /items without quality param uses config.quality default (1)
+          - POST /refresh {"quality": 2} passes quality=2 to get_prices
+          - POST /refresh with empty body uses config.quality
+          - Background _refresh_prices reads config.quality not hardcoded 1
+        acceptance_criteria:
+          - quality: int = 1 added to ScoringConfig in models.py
+          - list_items passes effective quality to rank_items_v2 and _fetch_volumes
+          - refresh_prices accepts optional RefreshRequest body with quality field
+          - _refresh_prices coroutine reads state.config.quality
+        failure_modes:
+          - scenario: ScoringConfig.__post_init__ raises ValueError after adding quality field
+            likelihood: low
+            impact: high
+            mitigation: >
+              __post_init__ only validates profit+focus+volume+freshness sum. quality is an
+              int field not included in that check. Confirm by reading __post_init__ before patching.
+        tech_stack:
+          - Python 3.11
+          - FastAPI
+          - Pydantic v2
+        test_coverage: Added in task-10 (test_api.py)
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # WAVE 3 — Frontend + Tests (task-08 and task-10 parallel; task-09 after task-08)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: task-08
+    title: "Feature: Search by name — frontend (FilterSidebar, api.ts, types.ts, page.tsx)"
+    description: |
+      Add a debounced text search input to the UI so users can filter items by display_name.
+
+      Changes:
+      1. frontend/src/lib/types.ts — add to ItemsQueryParams interface:
+           name_search?: string;
+
+      2. frontend/src/lib/api.ts — in fetchItems(), add after existing param mappings:
+           if (params.name_search) query.q = params.name_search;
+
+      3. frontend/src/components/FilterSidebar.tsx — add a search input above the
+         category list. Use useState<string> for the local input value. Use a
+         useEffect with setTimeout/clearTimeout (300ms debounce) to call onFilterChange
+         with { name_search: value } after the delay. Clear timer on unmount.
+         Label text: "Buscar por nome" (consistent with existing Portuguese labels).
+         Input type="search" with placeholder="ex: espada, arco...".
+
+      4. frontend/src/app/page.tsx — bind URL param "q" ↔ name_search:
+         - On mount / URL change: read searchParams.get("q") → pass as name_search
+           in the ItemsQueryParams built for fetchItems().
+         - On filter change from FilterSidebar: when name_search changes, update
+           URL param q (use router.replace with updated params).
+
+      Files changed: frontend/src/lib/types.ts, frontend/src/lib/api.ts,
+                     frontend/src/components/FilterSidebar.tsx, frontend/src/app/page.tsx
+    wave: 3
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-search
+    priority: medium
+    status: pending
+    dependencies:
+      - task-06
+    conflicts_with:
+      - task-09
+    context_files:
+      - path: frontend/src/lib/types.ts
+        description: ItemsQueryParams interface; existing optional fields pattern
+      - path: frontend/src/lib/api.ts
+        description: fetchItems query builder; existing param mapping pattern
+      - path: frontend/src/components/FilterSidebar.tsx
+        description: Component structure; existing useState/useEffect patterns; CATEGORY_LABELS for label style reference
+      - path: frontend/src/app/page.tsx
+        description: URL param read via searchParams; filter change handler; how params flow to fetchItems
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 4
+        estimated_lines: 45
+        focus_area: frontend search UX — debounced input + URL param
+        verification:
+          - Typing "espada" in search box updates URL ?q=espada after 300ms debounce
+          - Table refetches and shows only items with "espada" in display_name
+          - Clearing input removes q from URL and returns full list
+          - Direct URL load with ?q=sword pre-populates the search input
+          - Label "Buscar por nome" visible above category list
+        acceptance_criteria:
+          - name_search?: string added to ItemsQueryParams in types.ts
+          - fetchItems maps name_search to query param q
+          - FilterSidebar has debounced (300ms) text input above category list
+          - page.tsx reads URL param q → name_search and writes on change
+        failure_modes:
+          - scenario: Debounce causes stale closure over onFilterChange callback
+            likelihood: low
+            impact: low
+            mitigation: >
+              Use useRef to store the timer ID and useCallback on the debounced handler
+              with proper deps array. Or use the standard pattern: capture value in closure,
+              clear on unmount.
+        tech_stack:
+          - Next.js 14
+          - TypeScript
+          - React (useState, useEffect, useCallback)
+        test_coverage: null
+
+  - id: task-09
+    title: "Feature: Quality param — frontend (FilterSidebar quality selector, page.tsx)"
+    description: |
+      Wire the existing QUALITY_OPTIONS constant in FilterSidebar into a rendered quality
+      selector that is bound to URL param and passes quality to the API.
+
+      Note: api.ts already maps params.quality → query.quality (confirmed).
+            types.ts already has quality?: number in ItemsQueryParams (confirmed).
+            Only FilterSidebar rendering and page.tsx URL wiring are missing.
+
+      Changes:
+      1. frontend/src/components/FilterSidebar.tsx — if the quality <select> is not yet
+         rendered, add it using the existing QUALITY_OPTIONS array:
+           <select value={quality} onChange={e => onFilterChange({ quality: Number(e.target.value) })}>
+             {QUALITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+           </select>
+         Default selected value: 1 (Normal). Label: "Qualidade".
+         Follow the same UI pattern as tier/enchantment selectors in the sidebar.
+
+      2. frontend/src/app/page.tsx — bind URL param "quality":
+         - On mount / URL change: Number(searchParams.get("quality") ?? "1") → quality in params.
+         - On filter change: update URL param quality when changed.
+
+      Files changed: frontend/src/components/FilterSidebar.tsx, frontend/src/app/page.tsx
+      (verify types.ts and api.ts already handle quality — no changes expected)
+    wave: 3
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - feat-quality
+    priority: low
+    status: pending
+    dependencies:
+      - task-07
+      - task-08
+    conflicts_with: []
+    context_files:
+      - path: frontend/src/components/FilterSidebar.tsx
+        description: QUALITY_OPTIONS constant; existing tier/enchantment selector pattern for UI reference
+      - path: frontend/src/app/page.tsx
+        description: URL param handling; onFilterChange; how quality should integrate
+      - path: frontend/src/lib/types.ts
+        description: Verify quality already in ItemsQueryParams — read-only audit
+      - path: frontend/src/lib/api.ts
+        description: Verify quality already mapped in fetchItems — read-only audit
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: small
+        estimated_files: 2
+        estimated_lines: 30
+        focus_area: frontend quality selector UI
+        verification:
+          - Quality <select> renders with 5 options (Normal through Obra-prima)
+          - Selecting "Bom" (2) updates URL ?quality=2 and triggers refetch
+          - Default is 1 (Normal) on fresh page load
+          - URL ?quality=3 pre-selects "Notável" on load
+        acceptance_criteria:
+          - Quality selector rendered in FilterSidebar using QUALITY_OPTIONS
+          - URL param quality read and written via page.tsx
+          - types.ts and api.ts confirmed compatible without changes
+        failure_modes: []
+        tech_stack:
+          - Next.js 14
+          - TypeScript
+          - React
+        test_coverage: null
+
+  - id: task-10
+    title: "Tests: New unit + integration tests covering all changed behavior"
+    description: |
+      Add tests for all new and changed code paths. All 111 existing tests must continue
+      to pass. This task is independent of frontend tasks and can run in parallel with
+      task-08 and task-09.
+
+      New file — tests/test_item_names.py:
+        test_format_sword_t4_enchant1: format_item_id("T4_SWORD@1") == "Sword T4 +1"
+        test_format_leather_armor_set3: format_item_id("T6_ARMOR_LEATHER_SET3") == "Leather Armor T6 .3"
+        test_format_no_enchantment: format_item_id("T5_BOW") == "Bow T5"
+        test_format_fallback_unknown: format_item_id("UNKNOWN_ITEM") == "UNKNOWN_ITEM"
+        test_format_no_tier: format_item_id("JOURNAL_NOVICE") returns unchanged or title-cased
+
+      Additions to tests/test_scoring.py:
+        test_rank_items_v2_volumes_map_used: call rank_items_v2 with volumes_map={"item": 500.0};
+          verify ScoredItem.volume_score == 500.0, not buy_price_max
+        test_rank_items_v2_volumes_fallback: call with volumes_map=None;
+          verify volume_score equals buy_price_max value from fixture
+
+      Additions to tests/test_api.py:
+        test_list_items_q_filter: GET /items?q=sword — mock scored items include one with
+          display_name="Sword T4"; assert only matching items returned
+        test_list_items_q_case_insensitive: GET /items?q=SWORD matches items with "sword"
+        test_list_items_no_q_regression: GET /items returns all items when q absent
+        test_recipe_index_compound_key: AppState with two recipes sharing product_id but different
+          enchantment; after build_recipe_index, both independently retrievable via get_recipe
+        test_refresh_quality_param: POST /refresh with JSON body {"quality": 2}; verify
+          get_prices called with quality=2
+
+      Files changed: tests/test_item_names.py (new), tests/test_scoring.py, tests/test_api.py
+    wave: 3
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - bug-1
+      - bug-2
+      - feat-names
+      - feat-search
+      - feat-quality
+    priority: high
+    status: pending
+    dependencies:
+      - task-01
+      - task-02
+      - task-04
+      - task-05
+      - task-06
+      - task-07
+    conflicts_with: []
+    context_files:
+      - path: tests/test_api.py
+        description: Existing API test patterns; fixture/app factory usage; mock patterns for AlbionAPIClient
+      - path: tests/test_scoring.py
+        description: Existing rank_items_v2 test fixtures; how ScoredItem and MarketPrice are mocked
+      - path: src/item_names.py
+        description: format_item_id function created in task-04
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial planning
+        timestamp: "2026-04-13T00:00:00Z"
+        estimated_effort: medium
+        estimated_files: 3
+        estimated_lines: 120
+        focus_area: test coverage — all new behavior paths
+        verification:
+          - pytest -v runs clean with no failures
+          - All 111 original tests still pass
+          - New tests cover format_item_id (4+ cases), volumes_map (2 cases),
+            search filter (3 cases), compound key (1 case), quality refresh (1 case)
+          - No test imports from missing modules
+        acceptance_criteria:
+          - tests/test_item_names.py created with ≥5 test cases
+          - test_scoring.py extended with 2 volumes_map tests
+          - test_api.py extended with 5 new test cases
+          - Total test count >= 122 (111 + ~11 new)
+          - pytest -v exits 0
+        failure_modes:
+          - scenario: Test fixtures do not set display_name; ScoredItemSchema validation fails for search tests
+            likelihood: medium
+            impact: medium
+            mitigation: >
+              display_name defaults to "" in both ScoredItem and ScoredItemSchema.
+              Test fixtures that construct ScoredItem directly inherit the default safely.
+        tech_stack:
+          - pytest
+          - pytest-asyncio (if async tests needed)
+          - Python 3.11
+        test_coverage: self-contained

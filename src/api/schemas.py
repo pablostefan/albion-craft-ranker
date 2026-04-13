@@ -28,6 +28,7 @@ class ScoredItemSchema(BaseModel):
     bm_profit: float | None = None
     bm_return_rate_pct: float | None = None
     daily_volume: float | None = None
+    display_name: str = ""
 
 
 class ItemsResponse(BaseModel):

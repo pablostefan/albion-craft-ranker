@@ -92,6 +92,7 @@ export interface FilterValues {
   w_freshness: string;
   excludeCaerleon: string;
   useFocus: string;
+  nameSearch: string;
 }
 
 /* ── Active Chip ── */
@@ -133,6 +134,7 @@ export function ActiveFilterChips({
   if (filters.minProfit) chips.push({ key: "min_profit", label: "Lucro Mín.", value: `${filters.minProfit}s` });
   if (filters.excludeCaerleon !== "true") chips.push({ key: "exclude_caerleon", label: "Caerleon", value: "Incluído" });
   if (filters.useFocus === "true") chips.push({ key: "use_focus", label: "Foco", value: "Ativado" });
+  if (filters.nameSearch) chips.push({ key: "q", label: "Busca", value: filters.nameSearch });
 
   if (chips.length === 0) return null;
 
@@ -394,6 +396,18 @@ export default function FilterSidebar({
     onFilterChange("w_freshness", "");
   }, [defaultWeights, onFilterChange]);
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNameSearch = useCallback(
+    (value: string) => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = setTimeout(() => {
+        onFilterChange("q", value);
+      }, 300);
+    },
+    [onFilterChange],
+  );
+
   const filterControls = (
     <div className="space-y-5">
       {/* Exclude Caerleon toggle */}
@@ -465,6 +479,30 @@ export default function FilterSidebar({
           Usar Foco
         </span>
       </label>
+
+      {/* Name Search */}
+      <div>
+        <label
+          htmlFor="filter-name-search"
+          className="mb-1 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Buscar item
+        </label>
+        <input
+          id="filter-name-search"
+          type="text"
+          value={filters.nameSearch}
+          onChange={(e) => handleNameSearch(e.target.value)}
+          placeholder="Ex: Royal Armor"
+          className="w-full rounded-md border px-3 py-2 text-sm"
+          style={{
+            background: "var(--color-bg-canvas)",
+            borderColor: "var(--color-border-default)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
 
       {/* Market Mode */}
       <div>
