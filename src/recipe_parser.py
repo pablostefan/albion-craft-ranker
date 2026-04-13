@@ -142,7 +142,7 @@ def _parse_materials(recipe_data: dict[str, Any]) -> list[Material]:
         item_id = str(resource.get("@uniquename", "")).strip()
         if not item_id:
             continue
-        if item_id.startswith("QUESTITEM_"):
+        if item_id.startswith(("QUESTITEM_", "UNIQUE_GVGTOKEN_", "UNIQUE_TOKEN_")):
             continue
 
         materials.append(
