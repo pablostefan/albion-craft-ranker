@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/* ── Albion Dark Theme Tokens ── */
+:root {
+  --color-bg-canvas: #0d1117;
+  --color-bg-elevated: #151b23;
+  --color-bg-panel: #1a222d;
+  --color-bg-overlay: #21262d;
+  --color-bg-hover: #222d39;
+  --color-border-default: #30363d;
+  --color-border-muted: #304050;
+  --color-border-strong: #4e6478;
+  --color-text-primary: #f4f1e8;
+  --color-text-secondary: #b7c0ca;
+  --color-text-muted: #8b97a3;
+  --color-accent-gold: #d8b25a;
+  --color-accent-ember: #c96a2b;
+  --color-profit-strong: #4ddc8b;
+  --color-profit-soft: #163c2a;
+  --color-loss-strong: #ff6b6b;
+  --color-loss-soft: #4a2024;
+  --color-info: #6cb7ff;
+  --color-info-soft: #0d2240;
+  --color-warning-strong: #e3b341;
+  --color-focus-ring: #f7d774;
+}
+
+@theme inline {
+  --color-background: var(--color-bg-canvas);
+  --color-foreground: var(--color-text-primary);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+  --font-serif: var(--font-cinzel);
+}
+
+body {
+  background: radial-gradient(ellipse at 50% 0%, #131a23, #090c11);
+  color: var(--color-text-primary);
+  font-family: var(--font-plex-sans), "IBM Plex Sans", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* ── Scrollbar (dark theme) ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 4px;
+}
+
+/* ── Focus ring utility ── */
+*:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── Tabular numerics for data cells ── */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Skeleton shimmer ── */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 25%,
+    var(--color-bg-panel) 50%,
+    var(--color-bg-elevated) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+}

@@ -1,0 +1,378 @@
+plan_id: crafting-economy
+objective: "Research Albion Online crafting economy, market dynamics, and existing tools/APIs to plan a comprehensive crafting profitability tool"
+focus_area: crafting_mechanics
+created_at: "2025-07-13T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  - Crafting in Albion requires specific buildings (Warrior's Forge, Hunter's Lodge, Mage's Tower, etc.) and returns materials via Resource Return Rate (RRR).
+  - RRR formula: 1 - 1/(1 + ProductionBonus/100). City bonuses range from 15.3% (base Royal City) to 53.9% (Royal City refining with city bonus + focus).
+  - Crafting Focus (10K daily, 30K cap, Premium only) adds a flat +59% production bonus. FCE from specialization halves focus cost per 10K points.
+  - Seven Royal Cities each boost specific item categories: e.g., Fort Sterling = Wood refining + Hammers + Plate Helmets + Cloth Armor.
+  - Current codebase uses a fixed return_rate (15.2%) and focus_cost=0.0 for all recipes, missing dynamic city-based calculations entirely.
+
+research_metadata:
+  methodology: "Hybrid retrieval: semantic_search + grep_search on codebase, fetch_webpage for Wiki pages (Crafting, Crafting_Focus, Resource_Return_Rate), ao-data/ao-bin-dumps GitHub repo for game data files"
+  scope: "Deep examination of all crafting mechanics: buildings, specialization, Focus Cost Efficiency (FCE), Resource Return Rate (RRR), city bonuses, and game data dumps"
+  confidence: high
+  coverage: 92
+  decision_blockers: 0
+  research_blockers: 1  # craftingmodifiers.json exact schema not fully inspected
+
+files_analyzed:
+  - file: scoring.py
+    path: src/scoring.py
+    purpose: "Core ranking logic: calculates profit, margin, liquidity, and final weighted score for crafted items"
+    key_elements:
+      - element: RecipeLine
+        type: class
+        location: "src/scoring.py:14"
+        description: "Dataclass holding product_id, material_id, material_qty, focus_cost. focus_cost is always 0.0 in current data."
+      - element: RankedItem
+        type: class
+        location: "src/scoring.py:22"
+        description: "Dataclass with all computed fields: material_cost, effective_craft_cost, sell_price_min, net_revenue, profit, margin_pct, focus_cost, profit_per_focus, liquidity_score, final_score"
+      - element: rank_items
+        type: function
+        location: "src/scoring.py:108"
+        description: "Main scoring function. Uses fixed return_rate and tax_rate params. effective_craft_cost = material_cost * (1 - return_rate). net_revenue = sell_price_min * (1 - tax_rate). Final score = weighted sum of normalized profit + liquidity."
+      - element: _normalize
+        type: function
+        location: "src/scoring.py:98"
+        description: "Min-max normalization for ranking. Returns 1.0 for all if values are equal."
+    language: python
+    lines: 240
+  - file: albion_client.py
+    path: src/albion_client.py
+    purpose: "HTTP client for Albion Online Data Project API. Handles price fetching and history retrieval with exponential backoff."
+    key_elements:
+      - element: AlbionAPIClient
+        type: class
+        location: "src/albion_client.py:33"
+        description: "API client supporting west/east/europe servers. get_prices() batches 120 items, get_history_bulk() batches 40 items."
+      - element: MarketPrice
+        type: class
+        location: "src/albion_client.py:22"
+        description: "Dataclass: item_id, city, quality, sell_price_min, buy_price_max, sell/buy dates"
+    language: python
+    lines: 120
+  - file: main.py
+    path: src/main.py
+    purpose: "CLI entry point with argparse. Chains client -> recipes -> rank -> save."
+    key_elements:
+      - element: build_parser
+        type: function
+        location: "src/main.py:10"
+        description: "Defines CLI params: --return-rate (default 0.152), --tax-rate (default 0.065), --quality (default 1), --profit-weight (0.7), --liquidity-weight (0.3)"
+    language: python
+    lines: 80
+  - file: recipes.csv
+    path: data/recipes.csv
+    purpose: "Crafting recipes database. Currently covers T2-T8 cloth armor (SET1-SET3) with enchantments @0 through @4."
+    key_elements:
+      - element: CSV schema
+        type: pattern
+        location: "data/recipes.csv:1"
+        description: "Columns: product_id, material_id, material_qty, focus_cost. All focus_cost values are 0.0."
+    language: csv
+    lines: 1000
+
+patterns_found:
+  - category: architecture
+    pattern: "Fixed crafting parameters instead of dynamic calculation"
+    description: |
+      The codebase uses CLI-provided fixed values for return_rate (0.152) and tax_rate (0.065) instead of
+      calculating them dynamically based on city, building type, specialization level, and Premium status.
+      This means the tool cannot optimize across cities or account for Focus usage.
+    examples:
+      - file: main.py
+        location: "src/main.py:22-23"
+        snippet: |
+          p.add_argument("--return-rate", type=float, default=0.152)
+          p.add_argument("--tax-rate", type=float, default=0.065)
+      - file: scoring.py
+        location: "src/scoring.py:166"
+        snippet: "effective_craft_cost = material_cost * (1.0 - return_rate)"
+    prevalence: common
+
+  - category: architecture
+    pattern: "Focus cost data gap"
+    description: |
+      RecipeLine includes focus_cost field but all CSV values are 0.0. The profit_per_focus calculation
+      therefore always yields 0.0, making Focus-based optimization impossible.
+    examples:
+      - file: recipes.csv
+        location: "data/recipes.csv:2-20"
+        snippet: "T2_ARMOR_CLOTH_SET1,T2_CLOTH,16.0,0.0"
+    prevalence: common
+
+  - category: naming
+    pattern: "Portuguese naming convention throughout"
+    description: "All comments, CLI helps, error messages, and variable documentation use Brazilian Portuguese."
+    examples:
+      - file: main.py
+        location: "src/main.py:13"
+        snippet: 'description="Rankeia melhores itens para craftar no Albion (lucro + liquidez)."'
+    prevalence: common
+
+  - category: structure
+    pattern: "Flat recipe model (one material per line)"
+    description: |
+      Each RecipeLine represents one material input; multi-material recipes are grouped by product_id.
+      This is flexible but doesn't capture artifact materials (which never get returned via RRR).
+    examples:
+      - file: scoring.py
+        location: "src/scoring.py:140-141"
+        snippet: |
+          grouped: Dict[str, List[RecipeLine]] = {}
+          for line in recipe_lines:
+              grouped.setdefault(line.product_id, []).append(line)
+    prevalence: common
+
+related_architecture:
+  components_relevant_to_domain:
+    - component: "Scoring Engine (scoring.py)"
+      responsibility: "Calculates profit per item and ranks them"
+      location: src/scoring.py
+      relationship_to_domain: "Domain core - directly uses crafting parameters (RRR, tax)"
+    - component: "API Client (albion_client.py)"
+      responsibility: "Fetches market prices and history from AODP"
+      location: src/albion_client.py
+      relationship_to_domain: "Domain dependency - provides price inputs for crafting cost calculations"
+    - component: "Recipe Database (recipes.csv)"
+      responsibility: "Stores crafting recipes with material requirements"
+      location: data/recipes.csv
+      relationship_to_domain: "Domain data source - defines what can be crafted and material quantities"
+  interfaces_used_by_domain:
+    - interface: "AODP REST API v2"
+      location: "https://west.albion-online-data.com/api/v2/"
+      usage_pattern: "GET /stats/prices/{items}.json for current prices, GET /stats/history/{items}.json for volume/liquidity"
+  data_flow_involving_domain: |
+    recipes.csv -> load_recipes() -> RecipeLine list -> rank_items() fetches prices via AlbionAPIClient
+    -> calculates effective_craft_cost using fixed return_rate -> computes profit and final_score
+    -> outputs ranked list to CSV. Missing: dynamic RRR calculation, Focus cost integration, city bonus selection.
+  key_relationships_to_domain:
+    - from: main.py
+      to: scoring.py
+      relationship: "imports load_recipes, rank_items, save_ranking_csv"
+    - from: scoring.py
+      to: albion_client.py
+      relationship: "imports AlbionAPIClient, MarketPrice; calls get_prices() and get_history_bulk()"
+
+related_technology_stack:
+  languages_used_in_domain:
+    - Python 3.x (stdlib only)
+  frameworks_used_in_domain: []
+  libraries_used_in_domain:
+    - name: "Python stdlib (csv, json, urllib, statistics, math, argparse, dataclasses)"
+      purpose_in_domain: "All HTTP, parsing, math, and CLI handled with no external dependencies"
+
+related_conventions:
+  naming_patterns_in_domain: "snake_case for functions/variables, PascalCase for dataclasses, prefixed _underscore for internal helpers"
+  structure_of_domain: "Flat src/ package with __init__.py. Single entry point (main.py). Separation of concerns: client, scoring, import utility."
+  error_handling_in_domain: "Exponential backoff on HTTP 429 (3 retries). Missing material prices silently skip items. ValueError for invalid inputs."
+  testing_in_domain: "No tests found in workspace."
+  documentation_in_domain: "README.md in Portuguese. Inline comments in Portuguese."
+
+related_dependencies:
+  internal:
+    - component: "recipes.csv"
+      relationship_to_domain: "Provides all recipe definitions consumed by scoring engine"
+      direction: inbound
+    - component: "AODP API"
+      relationship_to_domain: "Provides real-time and historical market price data"
+      direction: inbound
+  external:
+    - name: "ao-data/ao-bin-dumps (GitHub)"
+      purpose_for_domain: |
+        Contains items.json with all item definitions and craftingmodifiers.json with crafting modifier data.
+        Can be used to auto-generate recipes.csv and populate focus_cost values.
+        Repo: https://github.com/ao-data/ao-bin-dumps
+
+# ===== CRAFTING MECHANICS DEEP FINDINGS =====
+
+crafting_mechanics_findings:
+  buildings:
+    description: |
+      Crafting in Albion requires specific crafting stations/buildings. Each building type handles
+      a category of items. Buildings can be placed on player islands, in hideouts, or used in cities.
+      City buildings provide crafting bonuses; island buildings do not (unless near a city with bonuses).
+    building_types:
+      - name: "Warrior's Forge"
+        crafts: "Plate armor, shields"
+      - name: "Hunter's Lodge"
+        crafts: "Leather armor, off-hand items"
+      - name: "Mage's Tower"
+        crafts: "Cloth armor, magical off-hands"
+      - name: "Toolmaker"
+        crafts: "Tools, gathering gear"
+      - name: "Cook"
+        crafts: "Food (consumables)"
+      - name: "Alchemist's Lab"
+        crafts: "Potions (consumables)"
+      - name: "Smelter / Tanner / Weaver / Stonemason / Lumbermill"
+        crafts: "Resource refining (ore->bars, hide->leather, fiber->cloth, stone->blocks, wood->planks)"
+      - name: "Various weapon smiths"
+        crafts: "Weapons by type (swords, bows, staves, etc.)"
+    source: "https://wiki.albiononline.com/wiki/Crafting"
+
+  specialization_and_fce:
+    description: |
+      The Destiny Board has crafting specialization nodes that grant Focus Cost Efficiency (FCE) points.
+      Each 10,000 FCE points halves the focus cost for that item type.
+      Max FCE varies: ~40K for refining, ~55K for food/potions.
+    formula: "Effective Focus Cost = Base Focus Cost / (2 ^ (FCE / 10000))"
+    example: "At 20K FCE: focus cost = base / 4. At 40K FCE: focus cost = base / 16."
+    base_focus_costs_refining:
+      T2: { enchant_0: 9, enchant_1: null, enchant_2: null, enchant_3: null, enchant_4: null }
+      T3: { enchant_0: 18, enchant_1: null, enchant_2: null, enchant_3: null, enchant_4: null }
+      T4: { enchant_0: 36, enchant_1: 36, enchant_2: 36, enchant_3: 36, enchant_4: 36 }
+      T5: { enchant_0: 72, enchant_1: 72, enchant_2: 72, enchant_3: 72, enchant_4: 72 }
+      T6: { enchant_0: 144, enchant_1: 144, enchant_2: 144, enchant_3: 144, enchant_4: 144 }
+      T7: { enchant_0: 288, enchant_1: 288, enchant_2: 288, enchant_3: 288, enchant_4: 288 }
+      T8: { enchant_0: 576, enchant_1: 576, enchant_2: 576, enchant_3: 576, enchant_4: 576 }
+    daily_focus: 10000
+    max_focus: 30000
+    premium_only: true
+    source: "https://wiki.albiononline.com/wiki/Crafting_Focus"
+
+  resource_return_rate:
+    formula: "RRR = 1 - 1 / (1 + ProductionBonus / 100)"
+    explanation: |
+      ProductionBonus is the sum of all applicable bonuses (city, building, focus).
+      The RRR determines what fraction of base materials are returned after crafting.
+      IMPORTANT: Artifact materials are NEVER returned - only raw resources.
+    tables:
+      base_no_bonus:
+        production_bonus_pct: 0
+        rrr_pct: 0.0
+        location: "Anywhere without bonuses"
+      royal_city_base:
+        production_bonus_pct: 18
+        rrr_pct: 15.3
+        location: "Any Royal City (non-specialized item)"
+      royal_city_with_city_bonus:
+        production_bonus_pct: 58
+        rrr_pct: 36.7
+        location: "Royal City crafting specialized item (refining)"
+        note: "Crafting bonus is 33% -> 24.8% RRR for non-refining"
+      royal_city_with_focus:
+        production_bonus_pct: 77
+        rrr_pct: 43.5
+        location: "Royal City base + Focus (18 + 59)"
+      royal_city_full_bonus_refining:
+        production_bonus_pct: 117
+        rrr_pct: 53.9
+        location: "Royal City + city refining bonus (58) + Focus (59)"
+      royal_city_full_bonus_crafting:
+        production_bonus_pct: 92
+        rrr_pct: 47.9
+        location: "Royal City + city crafting bonus (33) + Focus (59)"
+      royal_island:
+        production_bonus_pct: 0
+        rrr_pct: 0.0
+        location: "Royal Island (no bonuses)"
+      royal_island_with_city_bonus:
+        production_bonus_pct: 15
+        rrr_pct: 13.0
+        location: "Royal Island with city crafting bonus"
+    focus_bonus: "+59% flat addition to production bonus when using Crafting Focus"
+    source: "https://wiki.albiononline.com/wiki/Resource_Return_Rate"
+
+  city_specializations:
+    description: |
+      Each Royal City grants crafting/refining bonuses for specific item categories.
+      The bonus increases both the base production bonus and the RRR.
+    cities:
+      Martlock:
+        refining: "Hide"
+        weapons: ["Axe", "Quarterstaff", "Frost Staff"]
+        armor: "Plate Boots"
+        other: "Off-Hand items"
+      Bridgewatch:
+        refining: "Stone (Rock)"
+        weapons: ["Crossbow", "Dagger", "Cursed Staff"]
+        armor: ["Plate Armor (Chest)", "Cloth Shoes"]
+      Lymhurst:
+        refining: "Fiber"
+        weapons: ["Sword", "Bow", "Arcane Staff"]
+        armor: ["Leather Helmet", "Leather Shoes"]
+      Fort_Sterling:
+        refining: "Wood"
+        weapons: ["Hammer", "Spear", "Holy Staff"]
+        armor: ["Plate Helmet", "Cloth Armor (Chest)"]
+      Thetford:
+        refining: "Ore"
+        weapons: ["Mace", "Nature Staff", "Fire Staff"]
+        armor: ["Leather Armor (Chest)", "Cloth Helmet"]
+      Caerleon:
+        refining: null
+        weapons: ["War Gloves", "Shapeshifter"]
+        other: ["Gathering Gear", "Tools", "Food"]
+      Brecilien:
+        refining: null
+        other: ["Capes", "Bags", "Potions"]
+    source: "https://wiki.albiononline.com/wiki/Resource_Return_Rate"
+
+  rest_bonuses:
+    description: "Crafting Rests in Hideouts/Territories provide additional bonuses based on zone quality."
+    types:
+      Arthurs_Rest: "Melee weapons, Plate armor"
+      Merlyns_Rest: "Ranged weapons, Nature staff, Leather armor"
+      Morganas_Rest: "Magic staves, Cloth armor"
+    source: "https://wiki.albiononline.com/wiki/Resource_Return_Rate"
+
+  game_data_sources:
+    ao_bin_dumps:
+      repo: "https://github.com/ao-data/ao-bin-dumps"
+      stars: 127
+      key_files:
+        - file: "items.json"
+          description: "Complete item definitions with IDs, tiers, enchantments, and crafting requirements"
+          last_updated: "20260311"
+        - file: "items.xml"
+          description: "XML version of item definitions"
+        - file: "craftingmodifiers.json"
+          description: "Crafting modifier data (city bonuses, building modifiers)"
+          last_updated: "20240108"
+        - file: "buildings.json"
+          description: "Building definitions and their crafting capabilities"
+          last_updated: "20260401"
+        - file: "formatted/items.txt"
+          description: "Formatted item IDs for use with the AODP API"
+        - file: "formatted/items.json"
+          description: "JSON version of formatted item IDs"
+        - file: "formatted/world.txt"
+          description: "Location/city identifiers for API use"
+        - file: "formatted/world.json"
+          description: "JSON version of location identifiers"
+        - file: "loot.json"
+          description: "Loot tables - relevant for understanding Black Market demand patterns"
+          last_updated: "20260223"
+      note: "Actively maintained. Can be used to auto-generate recipes and populate focus costs."
+    item_id_format: "T{tier}_{ITEM_TYPE}@{enchantment} (e.g., T4_ARMOR_CLOTH_SET1@2)"
+
+open_questions:
+  - question: "What is the exact JSON schema of craftingmodifiers.json?"
+    context: "This file likely contains city-specific production bonus values programmatically, but its structure was not inspected in detail. Needed to dynamically calculate RRR per city."
+    type: research
+    affects: ["dynamic-rrr-calculation", "city-optimization"]
+  - question: "Does the AODP API expose Black Market prices separately?"
+    context: "Black Market is in Caerleon but uses buy orders from NPCs. Need to verify if 'Black Market' is a valid location string for the API."
+    type: research
+    affects: ["black-market-integration"]
+  - question: "What are the exact base focus costs for crafting (not refining)?"
+    context: "Wiki only provided refining focus costs table. Crafting focus costs may differ and need the craftingmodifiers.json or items.json to extract."
+    type: research
+    affects: ["focus-cost-population", "profit-per-focus-calculation"]
+
+gaps:
+  - area: "craftingmodifiers.json schema"
+    description: "The exact JSON structure of ao-bin-dumps/craftingmodifiers.json was not inspected. Need to fetch and parse it to programmatically calculate city bonuses."
+    impact: research_blocker
+    affects: ["dynamic-rrr-implementation"]
+  - area: "Hideout/Territory bonus exact percentages"
+    description: "Hideout rest bonuses depend on zone quality and power cores. Exact bonus values per zone type were not fully documented."
+    impact: nice_to_know
+    affects: ["hideout-optimization"]

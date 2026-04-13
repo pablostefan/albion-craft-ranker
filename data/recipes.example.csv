@@ -1,0 +1,5 @@
+product_id,material_id,material_qty,focus_cost
+T4_BAG,T4_CLOTH,16,58
+T4_BAG,T4_LEATHER,8,58
+T4_CAPE,T4_CLOTH,10,40
+T4_CAPE,T4_LEATHER,4,40

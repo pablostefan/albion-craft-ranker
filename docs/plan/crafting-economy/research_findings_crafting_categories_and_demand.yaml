@@ -1,0 +1,319 @@
+plan_id: crafting-economy
+objective: "Research crafting categories in Albion Online and item demand patterns (exit strategies)"
+focus_area: crafting_categories_and_demand
+created_at: "2025-07-13T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  - Albion has 7 major crafting categories: Weapons (melee/ranged/magic), Armor (plate/leather/cloth), Accessories (capes/bags/off-hand), Consumables (food/potions), Tools, Mounts, Gathering Gear.
+  - City specialization creates natural demand hubs: e.g., Fort Sterling for Hammers/Spears/Holy, Thetford for Maces/Nature/Fire.
+  - Black Market (Caerleon) is the primary exit for equipment - driven by mob kills. Consumables and resources cannot be sold there.
+  - Current recipes.csv only covers cloth armor (SET1-SET3). ao-bin-dumps/items.json can auto-generate full recipe database for all categories.
+  - Item demand is tiered: T4-T6 has highest volume (most common PvP/PvE gear), T7-T8 lower volume but higher margins.
+
+research_metadata:
+  methodology: "fetch_webpage for Wiki Crafting, Black Market, 3rd Party Tools pages. Codebase analysis of recipes.csv and import_from_xlsx.py"
+  scope: "All craftable item categories, demand drivers, exit strategies (marketplace vs Black Market), city specialization demand patterns"
+  confidence: high
+  coverage: 88
+  decision_blockers: 0
+  research_blockers: 1  # Exact loot.json structure not inspected
+
+files_analyzed:
+  - file: recipes.csv
+    path: data/recipes.csv
+    purpose: "Current recipe database"
+    key_elements:
+      - element: "Product coverage"
+        type: pattern
+        location: "data/recipes.csv:1-1000"
+        description: |
+          Covers ONLY cloth armor: T2-T8 ARMOR_CLOTH_SET1, SET2, SET3 with enchantments @0-@4.
+          Missing: weapons, plate armor, leather armor, accessories, consumables, tools, mounts, gathering gear.
+    language: csv
+    lines: 1000
+  - file: import_from_xlsx.py
+    path: src/import_from_xlsx.py
+    purpose: "Excel to CSV converter for importing recipe data"
+    key_elements:
+      - element: "Excel import"
+        type: pattern
+        location: "src/import_from_xlsx.py"
+        description: "Reads 'BD_Itens_Craft' sheet with 7 material slots per product. Currently limited to whatever items are in the source Excel."
+    language: python
+    lines: 60
+
+patterns_found:
+  - category: structure
+    pattern: "Single-category recipe coverage"
+    description: |
+      The recipes.csv only includes cloth armor (ARMOR_CLOTH_SET1/SET2/SET3), representing a tiny
+      fraction of all craftable items. The tool cannot rank across categories or find the global optimum.
+    examples:
+      - file: recipes.csv
+        location: "data/recipes.csv:1-5"
+        snippet: |
+          product_id,material_id,material_qty,focus_cost
+          T2_ARMOR_CLOTH_SET1,T2_CLOTH,16.0,0.0
+          T3_ARMOR_CLOTH_SET1,T3_CLOTH,16.0,0.0
+    prevalence: common
+
+  - category: architecture
+    pattern: "Manual recipe maintenance via Excel"
+    description: |
+      Recipes are imported from a manually curated Excel file, making expansion to all categories labor-intensive.
+      Using ao-bin-dumps/items.json would enable automatic recipe generation for the entire game.
+    examples:
+      - file: import_from_xlsx.py
+        location: "src/import_from_xlsx.py"
+        snippet: "Reads 'BD_Itens_Craft' tab with hard-coded 7 material slots"
+    prevalence: common
+
+related_architecture:
+  components_relevant_to_domain:
+    - component: "Recipe Database (recipes.csv)"
+      responsibility: "Defines craftable items and their material requirements"
+      location: data/recipes.csv
+      relationship_to_domain: "Domain core - determines what items can be ranked"
+    - component: "Import Utility (import_from_xlsx.py)"
+      responsibility: "Converts Excel to CSV format"
+      location: src/import_from_xlsx.py
+      relationship_to_domain: "Data ingestion for recipe database"
+  data_flow_involving_domain: |
+    Excel -> import_from_xlsx.py -> recipes.csv -> load_recipes() -> scoring.
+    Alternative: ao-bin-dumps/items.json -> new parser -> recipes.csv (covers ALL items).
+
+# ===== CRAFTING CATEGORIES & DEMAND FINDINGS =====
+
+crafting_categories:
+  weapons:
+    subcategories:
+      melee:
+        items: ["Sword", "Axe", "Mace", "Hammer", "Spear", "Dagger", "War Gloves"]
+        item_id_patterns:
+          sword: "T{tier}_MAIN_SWORD@{enchant}"
+          axe: "T{tier}_MAIN_AXE@{enchant}"
+          mace: "T{tier}_MAIN_MACE@{enchant}"
+          hammer: "T{tier}_MAIN_HAMMER@{enchant}"
+          spear: "T{tier}_MAIN_SPEAR@{enchant}"
+          dagger: "T{tier}_MAIN_DAGGER@{enchant}"
+        city_bonuses:
+          Lymhurst: ["Sword"]
+          Martlock: ["Axe", "Quarterstaff"]
+          Thetford: ["Mace"]
+          Fort_Sterling: ["Hammer", "Spear"]
+          Bridgewatch: ["Crossbow", "Dagger"]
+          Caerleon: ["War Gloves"]
+      ranged:
+        items: ["Bow", "Crossbow"]
+        city_bonuses:
+          Lymhurst: ["Bow"]
+          Bridgewatch: ["Crossbow"]
+      magic:
+        items: ["Fire Staff", "Holy Staff", "Arcane Staff", "Frost Staff", "Nature Staff", "Cursed Staff"]
+        city_bonuses:
+          Thetford: ["Fire Staff", "Nature Staff"]
+          Fort_Sterling: ["Holy Staff"]
+          Lymhurst: ["Arcane Staff"]
+          Martlock: ["Frost Staff"]
+          Bridgewatch: ["Cursed Staff"]
+    crafting_building: "Various weapon smiths (by type)"
+    materials: "Metal bars (primary) + refined resources (secondary) + optional artifacts"
+
+  armor:
+    subcategories:
+      plate:
+        items: ["Plate Helmet", "Plate Armor", "Plate Boots"]
+        city_bonuses:
+          Fort_Sterling: "Plate Helmet"
+          Bridgewatch: "Plate Armor"
+          Martlock: "Plate Boots"
+        crafting_building: "Warrior's Forge"
+        materials: "Metal bars + optional artifacts"
+      leather:
+        items: ["Leather Helmet", "Leather Armor", "Leather Shoes"]
+        city_bonuses:
+          Lymhurst: ["Leather Helmet", "Leather Shoes"]
+          Thetford: "Leather Armor"
+        crafting_building: "Hunter's Lodge"
+        materials: "Leather + optional artifacts"
+      cloth:
+        items: ["Cloth Cowl (Helmet)", "Cloth Robe (Armor)", "Cloth Sandals (Shoes)"]
+        city_bonuses:
+          Thetford: "Cloth Cowl"
+          Fort_Sterling: "Cloth Robe"
+          Bridgewatch: "Cloth Sandals"
+        crafting_building: "Mage's Tower"
+        materials: "Cloth + optional artifacts"
+        note: "This is the only category currently in recipes.csv"
+
+  accessories:
+    items: ["Capes", "Bags", "Off-hand items (Shields, Torches, Books, Orbs)"]
+    city_bonuses:
+      Brecilien: ["Capes", "Bags"]
+      Martlock: "Off-hand items"
+    crafting_building: "Various (depends on type)"
+
+  consumables:
+    subcategories:
+      food:
+        items: ["Soups", "Salads", "Pies", "Stews", "Omelettes", "Sandwiches"]
+        city_bonuses:
+          Caerleon: "Food"
+        crafting_building: "Cook"
+        materials: "Farmed crops, fish, animal products"
+        note: "Cannot be sold on Black Market. Pure player-to-player economy."
+      potions:
+        items: ["Healing Potions", "Energy Potions", "Resistance Potions", "Gathering Potions"]
+        city_bonuses:
+          Brecilien: "Potions"
+        crafting_building: "Alchemist's Lab"
+        materials: "Herbs, other alchemical ingredients"
+        note: "Cannot be sold on Black Market. High daily volume from PvP/PvE players."
+
+  tools:
+    items: ["Pickaxe", "Sickle", "Skinning Knife", "Axe (logging)", "Stone Hammer", "Fishing Rod"]
+    city_bonuses:
+      Caerleon: "Tools"
+    crafting_building: "Toolmaker"
+
+  gathering_gear:
+    items: ["Miner Cap/Garb/Workboots", "Harvester variants", "Skinner variants", etc.]
+    city_bonuses:
+      Caerleon: "Gathering Gear"
+    crafting_building: "Toolmaker"
+
+  mounts:
+    items: ["Riding Horse", "Armored Horse", "Transport Ox", "Spectral Bonehorse", etc.]
+    crafting_building: "Saddler"
+    note: "Mounts have unique crafting requirements and market dynamics"
+
+  refining:
+    description: "Not crafting per se, but resource refining generates profit through RRR"
+    types:
+      - name: "Metal Bars (Ore -> Bars)"
+        city_bonus: "Thetford"
+      - name: "Leather (Hide -> Leather)"
+        city_bonus: "Martlock"
+      - name: "Cloth (Fiber -> Cloth)"
+        city_bonus: "Lymhurst"
+      - name: "Planks (Wood -> Planks)"
+        city_bonus: "Fort Sterling"
+      - name: "Stone Blocks (Stone -> Blocks)"
+        city_bonus: "Bridgewatch"
+    note: "Refining gets higher RRR (36.7% with city bonus vs 24.8% for crafting)"
+
+demand_and_exit_strategies:
+  primary_exits:
+    player_marketplace:
+      description: "Sell directly to other players via sell orders or instant-sell to buy orders"
+      applicable_to: "ALL item types"
+      fee: "2.5% setup + 4-8% sales tax"
+      pros: ["Universal", "Price control", "All item types"]
+      cons: ["Setup fee risk", "Listing expiry (30 days)", "Competition"]
+
+    black_market:
+      description: "Sell equipment to NPC buy orders in Caerleon. Items become mob drops."
+      applicable_to: "EQUIPMENT ONLY (weapons, armor, accessories, tools, mounts)"
+      fee: "No listing fee. Sale at buy_price_max."
+      pros: ["No setup fee", "Instant sale at buy price", "Driven by game activity"]
+      cons: ["Equipment only", "Variable prices", "Must transport to Caerleon"]
+      demand_drivers:
+        - "Mob kills generate buy orders (more PvE = more demand)"
+        - "PvP deaths destroy items, increasing replacement demand"
+        - "New content patches and events spike activity"
+        - "Prime time hours increase activity and demand"
+      cannot_sell:
+        - "Resources (ores, hides, fibers, wood, stone)"
+        - "Consumables (food, potions)"
+        - "Resources and refined materials"
+
+  demand_tiers:
+    T4_to_T6:
+      volume: "Highest"
+      margin: "Lower per unit"
+      description: |
+        Most common PvP and PvE gear. Players use T4-T6 for faction warfare, corrupted dungeons,
+        and general PvP where full loot makes expensive gear risky. Highest Black Market volume.
+    T7_to_T8:
+      volume: "Lower"
+      margin: "Higher per unit"
+      description: |
+        End-game gear for experienced players. Lower volume but significantly higher margins.
+        More risky to craft (expensive materials) but higher profit per Focus point.
+    enchanted:
+      volume: "Variable"
+      margin: "Enchantment premium"
+      description: |
+        Enchanted items (@1 through @4) are more expensive to craft but command premium prices.
+        @1 and @2 have good volume, @3 and @4 are luxury with thin markets.
+
+  city_demand_patterns:
+    description: |
+      City bonuses create natural demand hubs. Players tend to craft (and sometimes buy) in
+      specialized cities to benefit from the bonus. This creates higher supply but also higher
+      volume in those cities.
+    patterns:
+      - city: Fort_Sterling
+        high_demand: ["Hammers", "Spears", "Holy Staves", "Plate Helmets", "Cloth Armor"]
+        reason: "Crafting bonus attracts crafters; nearby players buy locally"
+      - city: Thetford
+        high_demand: ["Maces", "Nature Staves", "Fire Staves", "Leather Armor", "Cloth Helmets"]
+        reason: "Crafting bonus + ore refining hub"
+      - city: Lymhurst
+        high_demand: ["Swords", "Bows", "Arcane Staves", "Leather Helmets", "Leather Shoes"]
+        reason: "Fiber refining + weapon crafting hub"
+      - city: Martlock
+        high_demand: ["Axes", "Quarterstaves", "Frost Staves", "Plate Boots", "Off-hands"]
+        reason: "Hide refining + diverse weapon crafting"
+      - city: Bridgewatch
+        high_demand: ["Crossbows", "Daggers", "Cursed Staves", "Plate Armor", "Cloth Shoes"]
+        reason: "Stone refining + ranged weapon focus"
+      - city: Caerleon
+        high_demand: ["War Gloves", "Tools", "Food", "Gathering Gear"]
+        reason: "Central hub, Black Market access, unique crafting bonuses"
+      - city: Brecilien
+        high_demand: ["Capes", "Bags", "Potions"]
+        reason: "Mists access, unique bonus categories"
+
+  artifact_items:
+    description: |
+      Some items require artifact components in addition to regular resources.
+      Artifacts are dropped by mobs and are always consumed during crafting (no RRR for artifacts).
+      This creates a supply constraint and typically higher margins but also higher risk.
+    types:
+      - "Runes (T4+ items)"
+      - "Souls (T4+ items)"
+      - "Relics (T4+ items)"
+    impact_on_profitability: |
+      Artifact items have a different cost structure: base resources get RRR but artifacts do not.
+      The current flat recipes model doesn't distinguish between artifact and resource materials.
+
+open_questions:
+  - question: "What is the exact loot.json schema and can it predict Black Market demand?"
+    context: "The loot.json in ao-bin-dumps maps mobs to item drops. If parsed, it could predict which items have highest Black Market demand based on popular mob-farming zones."
+    type: research
+    affects: ["black-market-demand-prediction"]
+  - question: "How many unique craftable items exist in the game?"
+    context: "Need to parse items.json to count total craftable items and assess recipe database completeness."
+    type: research
+    affects: ["recipe-auto-generation"]
+  - question: "What is the exact material breakdown for artifact items vs regular items?"
+    context: "Current RecipeLine model treats all materials the same. Need to flag artifact materials to exclude them from RRR calculations."
+    type: decision_blocker
+    affects: ["accurate-rrr-calculation", "artifact-cost-modeling"]
+
+gaps:
+  - area: "items.json parsing for full recipe database"
+    description: "Need to download and parse items.json from ao-bin-dumps to generate comprehensive recipe database covering all item categories"
+    impact: research_blocker
+    affects: ["recipe-expansion", "full-category-coverage"]
+  - area: "Artifact material identification"
+    description: "Need to identify which materials are artifacts (never returned via RRR) vs regular resources to calculate accurate effective craft costs"
+    impact: decision_blocker
+    affects: ["artifact-cost-modeling", "rrr-calculation"]
+  - area: "Consumable demand volume"
+    description: "No data on relative volume of consumable (food/potion) sales vs equipment sales. Important for deciding if consumable crafting should be prioritized."
+    impact: nice_to_know
+    affects: ["category-prioritization"]

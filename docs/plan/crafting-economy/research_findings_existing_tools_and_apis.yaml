@@ -1,0 +1,279 @@
+plan_id: crafting-economy
+objective: "Research existing tools, APIs, and data sources for Albion Online crafting/trading"
+focus_area: existing_tools_and_apis
+created_at: "2025-07-13T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  - Primary API: Albion Online Data Project (AODP) with 3 regional servers (west/east/europe). Rate limits: 180 req/min, 300 req/5min, 4096 char URL.
+  - Key endpoints: /api/v2/stats/prices (current), /api/v2/stats/history (volume), /api/v2/stats/gold (gold prices). Data sourced from player-installed client.
+  - Game data dumps: ao-data/ao-bin-dumps GitHub repo has items.json, craftingmodifiers.json, buildings.json, loot.json for offline data.
+  - 9+ third-party tools exist, notably Albion Free Market (crafting simulation), Tools4Albion (calculators), AlbionOnline2d (market metrics).
+  - Current codebase already uses AODP correctly but only leverages prices and history endpoints, not gold prices.
+
+research_metadata:
+  methodology: "fetch_webpage for AODP main page, API docs, ao-bin-dumps repo, albiondata-server-rails repo, 3rd Party Tools wiki page"
+  scope: "Complete survey of available APIs, data sources, game data files, and competing/complementary tools"
+  confidence: high
+  coverage: 95
+  decision_blockers: 0
+  research_blockers: 0
+
+files_analyzed:
+  - file: albion_client.py
+    path: src/albion_client.py
+    purpose: "Existing API client implementation"
+    key_elements:
+      - element: BASE_URLS
+        type: variable
+        location: "src/albion_client.py:14"
+        description: "Correctly maps west/east/europe to their AODP server URLs"
+      - element: get_prices
+        type: function
+        location: "src/albion_client.py:61"
+        description: "Batches up to 120 items per request. Uses /api/v2/stats/prices/{items}.json"
+      - element: get_history_bulk
+        type: function
+        location: "src/albion_client.py:93"
+        description: "Batches up to 40 items. Uses /api/v2/stats/history/{items}.json with time-scale=24"
+    language: python
+    lines: 120
+
+patterns_found:
+  - category: architecture
+    pattern: "Correct API usage with conservative batching"
+    description: |
+      The existing client correctly implements batching (120 for prices, 40 for history) and
+      exponential backoff for rate limiting. The batch sizes are reasonable given the 4096 char URL limit.
+    examples:
+      - file: albion_client.py
+        location: "src/albion_client.py:61-90"
+        snippet: "item_ids_str = ','.join(sorted(set(item_ids)))"
+    prevalence: common
+
+  - category: architecture
+    pattern: "Missing API endpoints"
+    description: |
+      The client only uses prices and history endpoints. Gold prices endpoint
+      (/api/v2/stats/gold.json) is not implemented. Charts endpoint not used either.
+    prevalence: common
+
+related_architecture:
+  components_relevant_to_domain:
+    - component: "AlbionAPIClient"
+      responsibility: "HTTP client for AODP REST API"
+      location: src/albion_client.py
+      relationship_to_domain: "Domain core - primary data source"
+  interfaces_used_by_domain:
+    - interface: "AODP REST API v2"
+      location: "https://west.albion-online-data.com/api/v2/"
+      usage_pattern: "JSON REST API with comma-separated item IDs in URL path"
+
+related_technology_stack:
+  languages_used_in_domain:
+    - Python 3.x
+  libraries_used_in_domain:
+    - name: "urllib (stdlib)"
+      purpose_in_domain: "HTTP requests to AODP API"
+    - name: "json (stdlib)"
+      purpose_in_domain: "Parse API responses"
+
+# ===== TOOLS & APIs DEEP FINDINGS =====
+
+apis_and_data_sources:
+  aodp_api:
+    name: "Albion Online Data Project (AODP)"
+    website: "https://www.albion-online-data.com"
+    description: |
+      Community-driven project that collects and serves Albion Online market data.
+      Data is sourced from players who install the Albion Online Data Client, which
+      captures market data as players browse the in-game auction houses.
+    servers:
+      americas: "https://west.albion-online-data.com"
+      europe: "https://europe.albion-online-data.com"
+      asia: "https://east.albion-online-data.com"
+    rate_limits:
+      per_minute: 180
+      per_5_minutes: 300
+      url_char_limit: 4096
+    endpoints:
+      prices:
+        url: "/api/v2/stats/prices/{item_ids}.json"
+        params:
+          locations: "Comma-separated city names (e.g., Martlock,Bridgewatch)"
+          qualities: "1-5 (Normal, Good, Outstanding, Excellent, Masterpiece)"
+        returns: "sell_price_min, sell_price_min_date, buy_price_max, buy_price_max_date per item/city/quality"
+        format: "JSON array (default) or XML with .xml extension"
+      table_view:
+        url: "/api/v2/stats/view/{item_ids}"
+        params: "Same as prices"
+        returns: "Tabular HTML view of price data"
+      history:
+        url: "/api/v2/stats/history/{item_ids}.json"
+        params:
+          date: "Start date (YYYY-MM-DD)"
+          end_date: "End date (YYYY-MM-DD)"
+          locations: "City name"
+          qualities: "Quality level"
+          time_scale: "1 (hourly), 6 (6-hour), 24 (daily)"
+        returns: "Historical sell orders only: item_count, price_min, price_max, price_avg per time bucket"
+        note: "Sell history only. Does not include buy order history."
+      charts:
+        url: "/api/v2/stats/charts/{item_ids}.json"
+        params: "Same as history"
+        returns: "Same data as history but in chart-friendly format"
+      gold:
+        url: "/api/v2/stats/gold.json"
+        params:
+          date: "Start date (optional)"
+          end_date: "End date (optional)"
+          count: "Number of latest records (alternative to date range)"
+        returns: "Gold price history (silver-to-gold exchange rate)"
+    swagger: "Available at server URL root"
+    data_client:
+      name: "Albion Online Data Client"
+      description: "Desktop application that captures market data from Albion Online game client"
+      platforms: ["Windows (.exe)", "Linux (CLI binary)"]
+    source: "https://www.albion-online-data.com/api"
+
+  aodp_server:
+    name: "albiondata-server-rails"
+    repo: "https://github.com/ao-data/albiondata-server-rails"
+    description: "The backend Rails server that powers the AODP API"
+    tech_stack: "Ruby on Rails"
+    version: "0.2.38"
+    details: |
+      Uses Redis for caching, with separate databases for each server region.
+      Redis DB mapping: 0=US West, 1=US East, 2=Europe, 3=Asia.
+      Cache databases: 5=US West cache, 6=US East cache, 7=Europe cache, 8=Asia cache.
+    contributors: 5
+    source: "https://github.com/ao-data/albiondata-server-rails"
+
+  game_data_dumps:
+    name: "ao-bin-dumps"
+    repo: "https://github.com/ao-data/ao-bin-dumps"
+    stars: 127
+    description: |
+      Regularly updated dump of Albion Online game data files extracted from the game client.
+      Contains all item definitions, crafting recipes, building data, loot tables, and more.
+      This is THE authoritative source for item IDs, crafting requirements, and game mechanics data.
+    key_files:
+      items_json:
+        path: "items.json"
+        purpose: "Complete item definitions - IDs, tiers, enchantments, crafting requirements, resource costs"
+        updated: "20260311"
+        usage: "Auto-generate recipes.csv with correct material quantities and focus costs"
+      items_xml:
+        path: "items.xml"
+        purpose: "XML version of item definitions (same data, different format)"
+      crafting_modifiers:
+        path: "craftingmodifiers.json"
+        purpose: "City-specific crafting bonuses and production modifier values"
+        updated: "20240108"
+        usage: "Calculate dynamic RRR per city instead of fixed parameter"
+      buildings:
+        path: "buildings.json"
+        purpose: "Building types and their crafting capabilities"
+        updated: "20260401"
+      loot:
+        path: "loot.json"
+        purpose: "Loot tables linking mob types to item drops. Useful for predicting Black Market demand."
+        updated: "20260223"
+      formatted_items:
+        txt_path: "formatted/items.txt"
+        json_path: "formatted/items.json"
+        purpose: "Pre-formatted item IDs ready for use with AODP API"
+      formatted_world:
+        txt_path: "formatted/world.txt"
+        json_path: "formatted/world.json"
+        purpose: "Location/city identifiers for AODP API"
+    source: "https://github.com/ao-data/ao-bin-dumps"
+
+third_party_tools:
+  - name: "Albion Free Market"
+    url: "https://albionfreemarket.com"
+    description: "Market prices, gear comparison, crafting simulation. Developed by JP CodeCraft team."
+    features: ["Market prices by item", "Gear comparison tool", "Crafting profit simulation"]
+    relevance: "Direct competitor - offers crafting simulation similar to our tool's goal"
+
+  - name: "Tools4Albion"
+    url: "https://tools4albion.com"
+    description: "Crafting, farming, and reprocessing calculators with developer info."
+    features: ["Crafting calculator", "Farming calculator", "Reprocessing calculator", "Developer API info"]
+    relevance: "Mature tool with crafting calculators. Good reference for feature parity."
+
+  - name: "AlbionOnline2d"
+    url: "https://albiononline2d.com/en/market"
+    description: "Selling metrics per auction house. Visualizes market trends."
+    features: ["Market metrics", "Per-city auction data", "Trend visualization"]
+    relevance: "Market visualization focus, complementary to our ranking approach"
+
+  - name: "Farm Profit Calculator"
+    url: "https://aofarm.skyline969.ca"
+    description: "Albion farming optimization tool"
+    features: ["Farm plot optimization", "Crop/animal profit calculation"]
+    relevance: "Niche tool - farming only, not crafting"
+
+  - name: "Albion Helper"
+    url: null
+    description: "Discord bot for market prices"
+    features: ["Discord integration", "Price lookup by item"]
+    relevance: "Different UX paradigm (chat-based). Low overlap."
+
+  - name: "Albionix Tools"
+    url: "https://albionix.app"
+    description: "Transport profitability calculator"
+    features: ["Transport route optimization", "Cross-city price comparison", "Profitability per route"]
+    relevance: "Addresses arbitrage use case. Could inform multi-city sell optimization."
+
+  - name: "Albion Online Tools"
+    url: "https://albiononlinetools.com"
+    description: "General toolkit"
+    features: ["Various utilities"]
+    relevance: "General - would need deeper inspection"
+
+  - name: "Albion Online Grind"
+    url: "https://albiononlinegrind.com"
+    description: "Island management, enchantment calculator, farming profits"
+    features: ["Island management", "Enchantment calculators", "Farming profit analysis"]
+    relevance: "Island-focused. Enchantment calculator concept is relevant."
+
+  - name: "Royal Forge"
+    url: "https://royalforge.crintech.pro"
+    description: "Market prices by category, kill events, build sharing, gold prices"
+    features: ["Market prices", "Kill event tracking", "Build sharing", "Gold price tracking"]
+    relevance: "Kill event tracking could inform Black Market demand prediction"
+
+  source: "https://wiki.albiononline.com/wiki/Third-Party_Tools"
+
+competitive_analysis:
+  our_strengths:
+    - "CLI tool - fast, scriptable, no browser needed"
+    - "Custom ranking formula (weighted profit + liquidity)"
+    - "Python stdlib only - zero dependencies"
+    - "API batch optimization already implemented"
+  gaps_vs_competitors:
+    - "No crafting simulation (vs Albion Free Market)"
+    - "No dynamic RRR/city bonus calculation (vs Tools4Albion)"
+    - "No cross-city comparison (vs Albionix)"
+    - "No Focus cost integration (vs any tool that calculates profit/focus)"
+    - "Only cloth armor recipes (vs tools covering all categories)"
+    - "No Black Market pricing"
+    - "No gold price tracking"
+
+open_questions:
+  - question: "Does Albion Free Market use the same AODP API or have a separate data source?"
+    context: "Understanding competitor data sources helps assess our tool's potential data advantage"
+    type: nice_to_know
+    affects: ["competitive-positioning"]
+
+gaps:
+  - area: "items.json schema analysis"
+    description: "Need to download and parse items.json from ao-bin-dumps to extract full recipe database with correct focus costs"
+    impact: research_blocker
+    affects: ["recipe-auto-generation", "focus-cost-population"]
+  - area: "Gold price endpoint unused"
+    description: "The gold price endpoint could enable silver-to-gold profit conversion, useful for comparing crafting to gold trading"
+    impact: nice_to_know
+    affects: ["gold-price-feature"]

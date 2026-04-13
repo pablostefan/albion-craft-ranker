@@ -1,0 +1,227 @@
+# Product Requirements Document — Albion Craft Ranker v2
+# Source of truth for research and planning
+prd_id: crafting-economy
+version: "2.0.0"
+
+user_stories:
+  - as_a: "Crafter de Albion Online"
+    i_want: "Ver um ranking de todos os itens craftáveis ordenados por lucratividade"
+    so_that: "Eu escolha os itens mais lucrativos para produzir com meus recursos limitados"
+
+  - as_a: "Crafter que usa Focus"
+    i_want: "Ver o lucro por ponto de focus de cada item"
+    so_that: "Eu maximize o retorno dos meus 10k focus diários"
+
+  - as_a: "Crafter multi-cidade"
+    i_want: "Ver qual cidade é melhor para craftar cada item (considerando bônus de cidade)"
+    so_that: "Eu não precise calcular manualmente o RRR de cada cidade"
+
+  - as_a: "Crafter que vende no Black Market"
+    i_want: "Poder alternar entre vender no Marketplace ou no Black Market"
+    so_that: "Eu compare as duas estratégias e escolha a mais lucrativa no momento"
+
+  - as_a: "Crafter que avalia viabilidade"
+    i_want: "Ver a porcentagem de retorno (margem de lucro %) de cada item"
+    so_that: "Eu consiga avaliar rapidamente se faz sentido produzir aquele item ou não"
+
+  - as_a: "Crafter iniciante"
+    i_want: "Um dashboard web intuitivo com filtros por categoria, tier e enchantment"
+    so_that: "Eu não precise usar CLI ou planilhas para tomar decisões"
+
+  - as_a: "Crafter avançado"
+    i_want: "Que as receitas sejam geradas automaticamente dos dados do jogo"
+    so_that: "Eu tenha cobertura de 100% dos itens sem manutenção manual"
+
+scope:
+  in_scope:
+    - "Dashboard web (FastAPI + Next.js) com ranking interativo"
+    - "Auto-geração de receitas a partir de ao-bin-dumps/items.json (3,982+ itens)"
+    - "RRR dinâmico por cidade usando craftingmodifiers.json"
+    - "Otimização de focus (profit_per_focus como métrica de ranking)"
+    - "Otimização cross-city (recomendação automática da melhor cidade por item)"
+    - "Black Market como opção toggle (Marketplace vs Black Market vs ambos)"
+    - "Separação de taxas: setup fee (2.5%) + sales tax (4% Premium / 8% Normal)"
+    - "Tratamento especial de artefatos (sem RRR em materiais de artefato)"
+    - "Filtros: categoria, tier, enchantment, cidade, qualidade"
+    - "Servidor West (Americas) como padrão, com opção de trocar"
+    - "Estratégia de custo de material: instant buy (sell_price_min) ou buy order (buy_price_max)"
+  out_of_scope:
+    - "Tracking de gold exchange rate (conversão silver→gold)"
+    - "Predição de demanda do Black Market via loot.json"
+    - "Building usage fees (arbitrários, sem API)"
+    - "Mobile app (apenas web responsivo)"
+    - "Sistema de alertas/notificações de preço"
+    - "Histórico pessoal de crafts/lucros"
+    - "Integração com Albion Online client"
+
+acceptance_criteria:
+  - criterion: "Cobertura de receitas ≥ 3,500 itens craftáveis"
+    verification: "Contar itens únicos no banco após parsing de items.json"
+
+  - criterion: "RRR calculado dinamicamente por cidade/categoria"
+    verification: "Comparar RRR de T4_CLOTH em Lymhurst (24.8%) vs Bridgewatch (15.2%)"
+
+  - criterion: "Focus optimization funcional"
+    verification: "Ranking por profit_per_focus mostra itens diferentes do ranking por profit absoluto"
+
+  - criterion: "Black Market toggle funcional"
+    verification: "Alternar entre Marketplace/Black Market muda os preços de venda e o ranking"
+
+  - criterion: "Cross-city optimization funcional"
+    verification: "Mesmo item aparece com cidades diferentes recomendadas baseado no bônus"
+
+  - criterion: "Dashboard carrega ranking em < 5 segundos"
+    verification: "Medir tempo de resposta da API com 100+ itens filtrados"
+
+  - criterion: "Materiais de artefato não recebem RRR"
+    verification: "Craft cost de T4_2H_BOW_KEEPER calcula artefato a 100% e planks com RRR"
+
+  - criterion: "Taxas separadas corretamente"
+    verification: "Profit com Premium (2.5%+4%=6.5%) > Profit com Normal (2.5%+8%=10.5%)"
+
+  - criterion: "Porcentagem de retorno (margem %) visível no ranking"
+    verification: "Cada item no ranking exibe return_rate_pct = (profit / total_cost) × 100. Itens com margem negativa aparecem destacados."
+
+needs_clarification:
+  - question: "Como representar receitas multi-material no schema?"
+    context: "RecipeLine atual suporta 1 material. Itens com artefatos precisam 2+."
+    impact: "Afeta schema do banco de dados e engine de scoring"
+    status: resolved
+    owner: system
+    resolution: "Usar relação 1:N — cada receita tem N linhas de materiais (recipe_materials table)"
+
+  - question: "Incluir journals (laborer) no ranking?"
+    context: "Journals são comprados com silver (@swaptransaction=true), não craftados"
+    impact: "Filtragem na geração de receitas"
+    status: resolved
+    owner: system
+    resolution: "Excluir itens com @swaptransaction=true — não são crafts reais"
+
+features:
+  - name: "Recipe Auto-Generation"
+    overview: "Parser de ao-bin-dumps/items.json que extrai todas as receitas craftáveis, incluindo enchantments, artefatos, e receitas alternativas. Normaliza craftresource (dict→list) e craftingrequirements (dict→list). Identifica artefatos via @maxreturnamount='0'."
+    status: planned
+
+  - name: "Dynamic RRR Engine"
+    overview: "Calcula RRR por item baseado em: cidade de craft, categoria do item (craftingmodifiers.json), uso de focus, e specialization. Fórmula: RRR = 1 - 1/(1 + ProductionBonus/100). Artefatos excluídos do RRR."
+    status: planned
+
+  - name: "Focus Optimization"
+    overview: "Adiciona focus_cost real de items.json e calcula profit_per_focus = (profit_with_focus - profit_without_focus) / focus_cost. Permite ranking por eficiência de focus."
+    status: planned
+
+  - name: "Cross-City Optimizer"
+    overview: "Para cada item, calcula profit em todas as 7 cidades royais + Caerleon. Recomenda a melhor cidade. Permite filtrar por cidade específica ou ver ranking global (item × cidade)."
+    status: planned
+
+  - name: "Black Market Integration"
+    overview: "Toggle opcional entre três modos: (1) Marketplace only — vende no marketplace da cidade, (2) Black Market only — vende no Black Market de Caerleon, (3) Comparação — mostra ambos lado a lado. Preços do BM via buy_price_max em location='Black Market'."
+    status: planned
+
+  - name: "Scoring Engine v2"
+    overview: "Evolução do scoring atual. Métricas: profit_absolute, return_rate_pct (margem de lucro % = profit/cost×100), profit_per_focus, liquidity_score (volume histórico), freshness_score (idade dos dados). return_rate_pct é exibido como coluna primária no ranking para o usuário avaliar se vale craftar. Pesos configuráveis pelo usuário."
+    status: planned
+
+  - name: "FastAPI Backend"
+    overview: "API REST com endpoints: GET /items (ranking com filtros), GET /items/{id} (detalhe), GET /cities (bônus), GET /config (parâmetros). Cache em memória com TTL. Background tasks para refresh de preços."
+    status: planned
+
+  - name: "Next.js Dashboard"
+    overview: "Interface web responsiva com: tabela de ranking sortável/filtrável, filtros por categoria/tier/enchantment/cidade, toggle Black Market, configuração de pesos, detalhe de item com breakdown de custos."
+    status: planned
+
+state_machines:
+  - name: "Price Data Lifecycle"
+    states: ["stale", "fetching", "fresh", "error"]
+    transitions:
+      - from: stale
+        to: fetching
+        trigger: "TTL expired or manual refresh"
+      - from: fetching
+        to: fresh
+        trigger: "API response received"
+      - from: fetching
+        to: error
+        trigger: "API error after retries"
+      - from: fresh
+        to: stale
+        trigger: "TTL expired"
+      - from: error
+        to: fetching
+        trigger: "Retry or manual refresh"
+
+  - name: "Sell Strategy"
+    states: ["marketplace", "black_market", "comparison"]
+    transitions:
+      - from: marketplace
+        to: black_market
+        trigger: "User toggles to Black Market"
+      - from: marketplace
+        to: comparison
+        trigger: "User toggles to Comparison"
+      - from: black_market
+        to: marketplace
+        trigger: "User toggles to Marketplace"
+      - from: black_market
+        to: comparison
+        trigger: "User toggles to Comparison"
+      - from: comparison
+        to: marketplace
+        trigger: "User toggles to Marketplace"
+      - from: comparison
+        to: black_market
+        trigger: "User toggles to Black Market"
+
+errors:
+  - code: ERR_API_RATE_LIMIT
+    message: "AODP API rate limit exceeded. Retrying in {seconds}s."
+  - code: ERR_API_TIMEOUT
+    message: "AODP API request timed out after {timeout}ms."
+  - code: ERR_PRICE_STALE
+    message: "Price data for {item_id} is older than {hours}h. Results may be inaccurate."
+  - code: ERR_RECIPE_PARSE
+    message: "Failed to parse crafting recipe for {item_id}: {reason}"
+  - code: ERR_NO_PRICE_DATA
+    message: "No market data available for {item_id} in {location}."
+
+decisions:
+  - id: ADR-001
+    status: accepted
+    decision: "FastAPI (Python) + Next.js (TypeScript) full-stack architecture"
+    rationale: "Aproveita código Python existente (scoring, API client). Next.js oferece SSR, bom DX, e ecossistema React."
+    alternatives: ["Django + HTMX", "Flask + React", "Python-only com Streamlit"]
+    consequences: ["Dois runtimes (Python + Node)", "Precisa de API contract entre backend e frontend"]
+
+  - id: ADR-002
+    status: accepted
+    decision: "Receitas geradas automaticamente de ao-bin-dumps/items.json"
+    rationale: "Cobertura de 3,982+ itens vs 90 atuais. Elimina manutenção manual de recipes.csv."
+    alternatives: ["Manter CSV manual", "Scraping da wiki", "Combinação manual + auto"]
+    consequences: ["Dependência de formato do ao-bin-dumps", "Parser precisa lidar com polimorfismo (dict/list)"]
+
+  - id: ADR-003
+    status: accepted
+    decision: "Black Market como toggle opcional — três modos: Marketplace, Black Market, Comparação"
+    rationale: "Usuário pediu explicitamente: 'Quero que eu possa escolher se vou usar o black market ou não, quero que tenha as duas opções'"
+    alternatives: ["Black Market sempre ativo", "Black Market como coluna extra fixa"]
+    consequences: ["UI precisa de toggle claro", "API precisa suportar sell_location parameter"]
+
+  - id: ADR-004
+    status: accepted
+    decision: "Relação 1:N para materiais de receita (recipe → recipe_materials)"
+    rationale: "Items com artefatos têm 2+ materiais. RecipeLine com 1 material por linha é limitante."
+    alternatives: ["Múltiplas colunas (material_1, material_2...)", "JSON blob no campo materials"]
+    consequences: ["Schema mais normalizado", "Query de custo precisa de JOIN/aggregation"]
+
+  - id: ADR-005
+    status: accepted
+    decision: "Servidor West (Americas) como padrão"
+    rationale: "Usuário joga no servidor West."
+    alternatives: ["East", "Europe"]
+    consequences: ["Base URL: west.albion-online-data.com", "Dropdown no dashboard para trocar"]
+
+changes:
+  - version: "2.0.0"
+    change: "PRD criado a partir da Discussion Phase e Research Phase completas"
+  - version: "2.0.1"
+    change: "Adicionado return_rate_pct (% de retorno) como métrica primária visível no ranking, por feedback do usuário"

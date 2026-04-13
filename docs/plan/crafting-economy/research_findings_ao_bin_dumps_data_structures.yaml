@@ -1,0 +1,843 @@
+plan_id: crafting-economy
+objective: "Research ao-data/ao-bin-dumps repository data structures for auto-generating recipes.csv"
+focus_area: ao_bin_dumps_data_structures
+created_at: "2025-07-20T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  1. items.json contém 3,982 itens craftáveis distribuídos em 18 categorias. O projeto atual cobre ~327 receitas (apenas cloth armor) — cobrindo 8.2% do total craftável.
+  2. craftingrequirements pode ser dict (3,170 itens) ou list (812 itens — receitas alternativas com ARTEFACT_TOKEN). craftresource pode ser dict (1,988 — recurso único) ou list (2,320 — múltiplos recursos).
+  3. Enchantments seguem padrão hierárquico: base.enchantments.enchantment[].craftingrequirements substitui os materiais (ex: T4_CLOTH → T4_CLOTH_LEVEL1@1). upgraderequirements define runes/souls/relics para upgrade path.
+  4. craftingmodifiers.json mapeia bônus de cidade por @craftingcategory (44 categorias únicas), com valores 0.15–0.40 para Royal Cities e 0.01–0.26 para Outlands scaling por cluster quality.
+  5. O recipes.csv atual (product_id, material_id, material_qty, focus_cost) suporta APENAS 1 material por linha — itens com artefatos (2+ recursos) exigem múltiplas linhas ou reestruturação do schema.
+
+research_metadata:
+  methodology: |
+    Direct JSON download + Python analysis of items.json (~50MB) from raw.githubusercontent.com.
+    Exhaustive field enumeration: iterated ALL categories, ALL craftingrequirements keys, ALL craftresource keys,
+    ALL craftingcategory values. Sample items inspected per category: equipmentitem, weapon, simpleitem,
+    consumableitem, mount, furnitureitem, journalitem, transformationweapon, crystalleagueitem, siegebanner, farmableitem.
+    craftingmodifiers.json analyzed via raw fetch in prior research pass.
+  scope: "Full items.json schema + craftingmodifiers.json schema + current recipes.csv gap analysis"
+  confidence: high
+  coverage: 95
+  decision_blockers: 1  # RecipeLine schema can only hold 1 material per row — multi-resource items need design decision
+  research_blockers: 0
+
+# ==============================================================
+# SECTION 1: REPOSITORY OVERVIEW
+# ==============================================================
+
+repository:
+  name: "ao-data/ao-bin-dumps"
+  url: "https://github.com/ao-data/ao-bin-dumps"
+  description: "Community-maintained dump of Albion Online game data files (XML→JSON converted)"
+  stars: 127
+  branch: master
+  raw_url_pattern: "https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/{filename}"
+  key_files:
+    - file: items.json
+      purpose: "All item definitions including crafting recipes, enchantments, stats"
+      last_updated: "20260311"
+      approximate_size: "~50MB"
+    - file: craftingmodifiers.json
+      purpose: "City/zone crafting bonuses per category"
+      last_updated: "20240108"
+    - file: formatted/items.json
+      purpose: "Formatted (pretty-printed) version of items.json"
+    - file: formatted/items.txt
+      purpose: "Flat index→uniquename→displayname mapping (11,000+ items)"
+    - file: formatted/world.json
+      purpose: "World/zone/cluster data"
+    - file: formatted/world.txt
+      purpose: "Flat zone name listing"
+  origin: "XML game data converted to JSON via xmltodict-style converter. All XML attributes become @-prefixed keys."
+
+# ==============================================================
+# SECTION 2: items.json TOP-LEVEL STRUCTURE
+# ==============================================================
+
+items_json_structure:
+  root_key: "items"
+  xml_schema_ref: "@xsi:noNamespaceSchemaLocation: items.xsd"
+  top_level_keys:
+    - key: "@xmlns:xsi"
+      type: string
+      value: "http://www.w3.org/2001/XMLSchema-instance"
+    - key: "shopcategories"
+      type: dict
+      purpose: "Hierarchical shop category tree (weapons > bow > bow_bow, bow_longbow, etc.)"
+    - key: "hideoutitem"
+      type: dict
+      count: 1
+      craftable: 1
+    - key: "trackingitem"
+      type: list
+      count: 6
+      craftable: 6
+      has_enchantments: 0
+    - key: "farmableitem"
+      type: list
+      count: 107
+      craftable: 49
+      has_enchantments: 0
+    - key: "simpleitem"
+      type: list
+      count: 1582
+      craftable: 1364
+      has_enchantments: 0
+      note: "Includes refined materials (T4_CLOTH, T4_METALBAR), components, runes/souls/relics, resources"
+    - key: "consumableitem"
+      type: list
+      count: 143
+      craftable: 104
+      has_enchantments: 91
+      note: "Potions and food — enchantments represent tier upgrades with additional ingredients"
+    - key: "rewardtoken"
+      type: dict
+      count: 1
+      craftable: 0
+    - key: "consumablefrominventoryitem"
+      type: list
+      count: 1258
+      craftable: 322
+      has_enchantments: 0
+      note: "Includes vanity unlockers, furniture placement items"
+    - key: "trashitem"
+      type: list
+      count: 8
+      craftable: 0
+    - key: "equipmentitem"
+      type: list
+      count: 1104
+      craftable: 867
+      has_enchantments: 709
+      note: "All armor pieces (head, armor, shoes), capes, bags, offhands, gatherer gear"
+    - key: "weapon"
+      type: list
+      count: 771
+      craftable: 754
+      has_enchantments: 645
+      note: "All weapons including faction variants with artefact requirements"
+    - key: "mount"
+      type: list
+      count: 108
+      craftable: 108
+      has_enchantments: 0
+    - key: "furnitureitem"
+      type: list
+      count: 312
+      craftable: 199
+      has_enchantments: 0
+    - key: "mountskin"
+      type: list
+      count: 158
+      craftable: 0
+    - key: "journalitem"
+      type: list
+      count: 133
+      craftable: 133
+      has_enchantments: 0
+      note: "Laborer journals — purchased with silver (@swaptransaction=true)"
+    - key: "labourercontract"
+      type: list
+      count: 77
+      craftable: 0
+    - key: "transformationweapon"
+      type: list
+      count: 41
+      craftable: 41
+      has_enchantments: 40
+      note: "Shapeshifter staves — require 3 resources (planks + leather + alchemy component)"
+    - key: "crystalleagueitem"
+      type: list
+      count: 29
+      craftable: 29
+      has_enchantments: 0
+      note: "Crystal league tokens — silver-only purchases"
+    - key: "siegebanner"
+      type: list
+      count: 5
+      craftable: 5
+      has_enchantments: 0
+    - key: "killtrophy"
+      type: list
+      count: 9
+      craftable: 0
+
+  total_items: 5856  # approximate from sums
+  total_craftable: 3982
+
+# ==============================================================
+# SECTION 3: CRAFTING RECIPE SCHEMA
+# ==============================================================
+
+crafting_recipe_schema:
+  description: |
+    Every craftable item has a `craftingrequirements` field at the item level.
+    Items with enchantments have ADDITIONAL craftingrequirements inside each
+    enchantment entry. The enchanted version REPLACES the base recipe entirely
+    (different material, different focus cost, different craft time).
+
+  structural_polymorphism:
+    craftingrequirements:
+      as_dict: 3170
+      as_list: 812
+      explanation: |
+        DICT (single recipe): Most items have exactly one way to craft them.
+        LIST (alternative recipes): Items like faction weapons and refined materials
+        offer 2+ alternative recipes. Example: T4_2H_BOW_KEEPER has [recipe_with_artefact, recipe_with_token].
+        T4_CLOTH has [recipe_with_fiber+prev_tier, recipe_with_fiber+faction_token+prev_tier].
+        The FIRST element in the list is typically the "standard" recipe.
+
+    craftresource:
+      as_dict: 1988
+      as_list: 2320
+      explanation: |
+        DICT (single material): Items requiring only one resource type. Example: T4_HEAD_CLOTH_SET1 needs 8x T4_CLOTH.
+        LIST (multiple materials): Items requiring 2+ different resources. Example: T4_2H_BOW_KEEPER needs 32x T4_PLANKS + 1x T4_ARTEFACT_2H_BOW_KEEPER.
+        Parser MUST normalize both to list for uniform handling.
+
+  craftingrequirements_fields:
+    always_present:
+      - field: "craftresource"
+        type: "dict | list[dict]"
+        purpose: "Material(s) required to craft"
+        note: "Absent in silver-only/swap purchases (journals, crystal league)"
+    common:
+      - field: "@silver"
+        type: string (numeric)
+        purpose: "Silver cost to craft"
+        default: "0"
+      - field: "@time"
+        type: string (numeric)
+        purpose: "Crafting time in fractional minutes"
+        example: "0.333 = 20 seconds"
+      - field: "@craftingfocus"
+        type: string (numeric)
+        purpose: "Focus cost to apply focus bonus"
+        note: "0 means focus cannot be used"
+    optional:
+      - field: "@amountcrafted"
+        type: string (numeric)
+        purpose: "Number of items produced per craft"
+        default: "1 (implicit)"
+        note: "Used by consumables (potions=5, food=10), refined materials (1)"
+      - field: "@forcesinglecraft"
+        type: string (boolean)
+        purpose: "If false, allows batch crafting"
+      - field: "@swaptransaction"
+        type: string (boolean)
+        purpose: "If true, this is a silver purchase (swap), not a craft"
+        note: "Used by journals, farming seeds, crystal league tokens"
+      - field: "@compensategold"
+        type: string (numeric)
+        purpose: "Gold compensation for certain purchases"
+      - field: "@gold"
+        type: string (numeric)
+        purpose: "Gold cost"
+      - field: "@returnproductnotresource"
+        type: string (boolean)
+        purpose: "If true, resource return gives back the product instead of materials"
+      - field: "@salvageitemfactor"
+        type: string (numeric)
+        purpose: "Salvage return factor for items"
+      - field: "@salvagesilverfactor"
+        type: string (numeric)
+        purpose: "Salvage silver return factor"
+      - field: "@buildingfilter"
+        type: string
+        purpose: "Which crafting station building is required"
+      - field: "@craftsingleperdefault"
+        type: string (boolean)
+        purpose: "Default to crafting single items"
+      - field: "@craftbuttonlocaoverride"
+        type: string
+        purpose: "Localization key override for craft button text (e.g. 'Refine' instead of 'Craft')"
+    special_nested:
+      - field: "currency"
+        type: dict
+        purpose: "Faction currency cost"
+        schema: "{@uniquename: 'FACTION_xxx', @amount: string(numeric)}"
+        note: "Used for faction-locked purchases (e.g. faction mounts)"
+      - field: "playerfactionstanding"
+        type: dict
+        purpose: "Faction standing requirement"
+        schema: "{@faction: string, @minstanding: string(numeric)}"
+      - field: "standing"
+        type: dict
+        purpose: "Standing requirement"
+      - field: "vanityunlocked"
+        type: present/absent flag
+        purpose: "Whether a vanity item must be unlocked first"
+
+  craftresource_fields:
+    required:
+      - field: "@uniquename"
+        type: string
+        purpose: "Unique identifier of the required material"
+        example: "T4_CLOTH, T4_PLANKS, T4_ARTEFACT_2H_BOW_KEEPER"
+      - field: "@count"
+        type: string (numeric)
+        purpose: "Quantity required"
+    optional:
+      - field: "@enchantmentlevel"
+        type: string (numeric)
+        purpose: "Required enchantment level of the material"
+        note: "Only present for enchanted recipes. Value matches the enchantment level (1-4)"
+      - field: "@maxreturnamount"
+        type: string (numeric)
+        purpose: "Maximum amount that can be returned via resource return"
+        note: "Set to '0' for artefacts and special components to prevent them being returned"
+      - field: "@preservequality"
+        type: string (boolean)
+        purpose: "Whether quality is preserved from input material"
+
+# ==============================================================
+# SECTION 4: ITEM-LEVEL CRAFTING FIELDS
+# ==============================================================
+
+item_level_crafting_fields:
+  description: "Fields on the item object itself (not inside craftingrequirements)"
+  fields:
+    - field: "@uniquename"
+      type: string
+      purpose: "Primary identifier. Convention: T{tier}_{TYPE}[_{SUBTYPE}][_{SET/FACTION}]"
+      examples:
+        - "T4_HEAD_CLOTH_SET1"       # Scholar Cowl
+        - "T4_2H_BOW_KEEPER"        # Keeper faction bow
+        - "T4_CLOTH"                 # Refined cloth
+        - "T4_CLOTH_LEVEL1"         # Enchanted cloth (level 1)
+        - "T2_POTION_HEAL"          # Health potion
+    - field: "@tier"
+      type: string (numeric)
+      purpose: "Item tier (2-8 for most craftables)"
+    - field: "@craftingcategory"
+      type: string
+      purpose: "Maps directly to craftingmodifiers.json bonus categories"
+      note: "44 unique values — see craftingcategory_values section"
+    - field: "@shopcategory"
+      type: string
+      purpose: "Top-level shop category (weapons, head, armor, shoes, etc.)"
+    - field: "@shopsubcategory1"
+      type: string
+      purpose: "Sub-category matching craftingcategory in most cases"
+    - field: "@shopsubcategory2"
+      type: string
+      purpose: "Specific item sub-category (e.g. head_cloth_set1)"
+    - field: "@maxqualitylevel"
+      type: string (numeric)
+      purpose: "Maximum quality level (1-5). Only equipment."
+    - field: "@itemvalue"
+      type: string (numeric)
+      purpose: "Base item value used for various calculations"
+    - field: "@weight"
+      type: string (numeric)
+      purpose: "Item weight for carry capacity calculations"
+    - field: "@enchantmentlevel"
+      type: string (numeric)
+      purpose: "Base enchantment level of the item (usually 0)"
+      note: "Only on simpleitem (refined materials)"
+    - field: "@unlockedtocraft"
+      type: string (boolean)
+      purpose: "Whether item requires spec to unlock crafting"
+
+# ==============================================================
+# SECTION 5: ENCHANTMENT SYSTEM
+# ==============================================================
+
+enchantment_system:
+  description: |
+    Equipment and consumables may have an `enchantments` field containing
+    `enchantment` (dict for single, list for multiple levels 1-4).
+    Each enchantment level provides a COMPLETE REPLACEMENT recipe.
+    
+  structure:
+    parent_key: "enchantments"
+    child_key: "enchantment"
+    polymorphism: "dict (single level) or list[dict] (multiple levels)"
+    
+  enchantment_fields:
+    - field: "@enchantmentlevel"
+      type: string (numeric)
+      purpose: "Enchantment level (1, 2, 3, or 4)"
+    - field: "@itempower"
+      type: string (numeric)
+      purpose: "Item power at this enchantment level"
+    - field: "@durability"
+      type: string (numeric)
+      purpose: "Durability at this enchantment level"
+    - field: "craftingrequirements"
+      type: "dict | list[dict]"
+      purpose: "COMPLETE recipe for crafting at this enchantment level"
+      note: "Same schema as base craftingrequirements — fully replaces base"
+    - field: "upgraderequirements"
+      type: dict
+      purpose: "Materials needed to UPGRADE from previous enchantment level"
+      schema:
+        upgraderesource:
+          "@uniquename": "T{tier}_RUNE | T{tier}_SOUL | T{tier}_RELIC | T{tier}_AVALONIAN_ENERGY"
+          "@count": "string (numeric)"
+      note: "Upgrade path: base→@1 uses RUNE, @1→@2 uses SOUL, @2→@3 uses RELIC, @3→@4 uses AVALONIAN_ENERGY (varies)"
+
+  enchanted_material_naming_convention: |
+    Base material: T4_CLOTH
+    Enchanted material: T4_CLOTH_LEVEL{N} where N = enchantment level (1-4)
+    Pattern: {base_uniquename}_LEVEL{enchantment_level}
+    
+  enchanted_product_naming_convention: |
+    Product IDs in recipes.csv use @N suffix: T4_HEAD_CLOTH_SET1@1
+    This convention is NOT in items.json — it's derived by appending @{enchantmentlevel}
+    to the base @uniquename.
+
+  example_t4_head_cloth_set1:
+    base:
+      craftingfocus: 429
+      time: "0.333"
+      craftresource: {uniquename: "T4_CLOTH", count: 8}
+    enchantment_1:
+      craftingfocus: 750
+      time: "0.5"
+      craftresource: {uniquename: "T4_CLOTH_LEVEL1", enchantmentlevel: 1, count: 8}
+      upgraderesource: {uniquename: "T4_RUNE", count: 96}
+    enchantment_2:
+      craftingfocus: 1313
+      time: "0.667"
+      craftresource: {uniquename: "T4_CLOTH_LEVEL2", enchantmentlevel: 2, count: 8}
+      upgraderesource: {uniquename: "T4_SOUL", count: 96}
+    enchantment_3:
+      craftingfocus: 2298
+      time: "0.833"
+      craftresource: {uniquename: "T4_CLOTH_LEVEL3", enchantmentlevel: 3, count: 8}
+      upgraderesource: {uniquename: "T4_RELIC", count: 96}
+    enchantment_4:
+      craftingfocus: 4021
+      time: "1.25"
+      craftresource: {uniquename: "T4_CLOTH_LEVEL4", enchantmentlevel: 4, count: 8}
+
+# ==============================================================
+# SECTION 6: CRAFTING CATEGORY → CITY BONUS MAPPING
+# ==============================================================
+
+craftingcategory_values:
+  description: "All 44 unique @craftingcategory values found across items.json"
+  equipment_categories:
+    - arcanestaff
+    - axe
+    - bag
+    - bow
+    - cape
+    - cloth_armor
+    - cloth_helmet
+    - cloth_shoes
+    - crossbow
+    - cursestaff
+    - dagger
+    - firestaff
+    - froststaff
+    - gatherergear
+    - hammer
+    - holystaff
+    - knuckles
+    - leather_armor
+    - leather_helmet
+    - leather_shoes
+    - mace
+    - naturestaff
+    - offhand
+    - plate_armor
+    - plate_helmet
+    - plate_shoes
+    - quarterstaff
+    - shapeshifterstaff
+    - spear
+    - sword
+    - tools
+  consumable_categories:
+    - food
+    - potion
+  refining_categories:
+    - fiber
+    - hide
+    - ore
+    - rock
+    - wood
+  meat_categories:
+    - meat_chicken
+    - meat_cow
+    - meat_goat
+    - meat_goose
+    - meat_pig
+    - meat_sheep
+
+# ==============================================================
+# SECTION 7: SAMPLE RECIPES BY ITEM TYPE
+# ==============================================================
+
+sample_recipes:
+  single_resource_equipment:
+    description: "Most standard equipment — single material type"
+    example_item: "T4_HEAD_CLOTH_SET1 (Scholar Cowl)"
+    craftingrequirements:
+      silver: "0"
+      time: "0.333"
+      craftingfocus: "429"
+      craftresource:
+        uniquename: "T4_CLOTH"
+        count: "8"
+    notes: "craftresource is a DICT (not list) when single material"
+
+  multi_resource_faction_weapon:
+    description: "Faction weapons require artefact + material"
+    example_item: "T4_2H_BOW_KEEPER (Keeper faction bow)"
+    craftingrequirements_is_list: true
+    craftingrequirements_0:  # Standard recipe
+      silver: "0"
+      time: "1.333"
+      craftingfocus: "1715"
+      craftresource:
+        - {uniquename: "T4_PLANKS", count: "32"}
+        - {uniquename: "T4_ARTEFACT_2H_BOW_KEEPER", count: "1", maxreturnamount: "0"}
+    craftingrequirements_1:  # Token alternative recipe
+      craftingfocus: "1715"
+      time: "1.333"
+      craftresource:
+        - {uniquename: "T4_PLANKS", count: "32"}
+        - {uniquename: "T4_ARTEFACT_TOKEN_FAVOR_3", count: "1", maxreturnamount: "0"}
+    notes: "Alternative recipe uses generic artefact token instead of specific artefact"
+
+  refined_material:
+    description: "Refining raw resources into refined materials"
+    example_item: "T4_CLOTH"
+    craftingcategory: "fiber"
+    craftingrequirements_is_list: true
+    craftingrequirements_0:  # Standard recipe
+      silver: "0"
+      time: "0.04167"
+      craftingfocus: "54"
+      amountcrafted: "1"
+      craftresource:
+        - {uniquename: "T4_FIBER", count: "2", enchantmentlevel: "0"}
+        - {uniquename: "T3_CLOTH", count: "1", enchantmentlevel: "0"}
+    craftingrequirements_1:  # Faction token recipe
+      silver: "0"
+      time: "0.04167"
+      craftingfocus: "54"
+      amountcrafted: "1"
+      craftresource:
+        - {uniquename: "T4_FIBER", count: "1", enchantmentlevel: "0"}
+        - {uniquename: "T1_FACTION_SWAMP_TOKEN_1", count: "1"}
+        - {uniquename: "T3_CLOTH", count: "1", enchantmentlevel: "0"}
+    notes: "Refining always requires prev-tier refined + raw. Second recipe uses faction token to halve raw input."
+
+  consumable_potion:
+    description: "Potions — crafted in batches"
+    example_item: "T2_POTION_HEAL"
+    craftingcategory: "potion"
+    craftingrequirements:
+      silver: "0"
+      amountcrafted: "5"
+      forcesinglecraft: "false"
+      craftingfocus: "56"
+      time: "0.1285"
+      craftresource:
+        uniquename: "T2_AGARIC"
+        count: "8"
+    notes: "amountcrafted=5 means each craft produces 5 potions"
+
+  consumable_food_with_enchantments:
+    description: "Food items — enchantments add ingredients"
+    example_item: "T1_MEAL_SOUP"
+    craftingcategory: "food"
+    base_craftingrequirements:
+      amountcrafted: "10"
+      craftingfocus: "56"
+      time: "0.257"
+      craftresource: {uniquename: "T1_CARROT", count: "16"}
+    enchantment_1:
+      amountcrafted: "10"
+      craftingfocus: "78"
+      time: "0.257"
+      craftresource:
+        - {uniquename: "T1_CARROT", count: "16"}
+        - {uniquename: "T1_FISHSAUCE_LEVEL1", count: "10"}
+    notes: "Food enchantments ADD a fish sauce ingredient rather than replacing materials"
+
+  mount:
+    description: "Mounts — require grown animal + materials"
+    example_item: "UNIQUE_MOUNT_ARMORED_HORSE_KNIGHT_01_TEST"
+    craftingrequirements:
+      silver: "0"
+      time: "0.625"
+      craftingfocus: "486"
+      craftresource:
+        - {uniquename: "T3_FARM_HORSE_GROWN", count: "1", maxreturnamount: "0"}
+        - {uniquename: "T3_LEATHER", count: "20"}
+    notes: "Grown animal has maxreturnamount=0 (cannot be returned)"
+
+  furniture:
+    description: "Furniture items — multiple materials"
+    example_item: "T4_FURNITUREITEM_REPAIRKIT"
+    craftingrequirements:
+      time: "0.66667"
+      craftingfocus: "280"
+      craftresource:
+        - {uniquename: "T4_PLANKS", count: "8"}
+        - {uniquename: "T4_METALBAR", count: "8"}
+
+  transformation_weapon:
+    description: "Shapeshifter staves — 3 resource types"
+    example_item: "T3_2H_SHAPESHIFTER_SET1"
+    craftingcategory: "shapeshifterstaff"
+    craftingrequirements:
+      silver: "0"
+      time: "1"
+      craftingfocus: "980"
+      craftresource:
+        - {uniquename: "T3_PLANKS", count: "20"}
+        - {uniquename: "T3_LEATHER", count: "12"}
+        - {uniquename: "T1_ALCHEMY_COMMON", count: "5", maxreturnamount: "0"}
+
+  silver_purchase:
+    description: "Items purchased with silver (not crafted)"
+    example_item: "T2_JOURNAL_WOOD"
+    craftingrequirements:
+      silver: "500"
+      time: "0"
+      swaptransaction: "true"
+    notes: "Not actual crafting — silver swap transaction. Should be excluded from profit ranking."
+
+  faction_currency_purchase:
+    description: "Items purchased with faction currency"
+    example_item: "T5_FARM_MOABIRD_FW_BRIDGEWATCH_BABY"
+    craftingrequirements:
+      time: "0"
+      swaptransaction: "true"
+      playerfactionstanding: {faction: "Steppe", minstanding: "120000"}
+      currency: {uniquename: "FACTION_STEPPE", amount: "3000"}
+    notes: "Requires faction standing + currency. No material crafting."
+
+# ==============================================================
+# SECTION 8: GAP ANALYSIS — CURRENT recipes.csv vs items.json
+# ==============================================================
+
+gap_analysis:
+  current_recipes_csv:
+    path: "data/recipes.csv"
+    total_lines: 327
+    columns: ["product_id", "material_id", "material_qty", "focus_cost"]
+    coverage: "Cloth armor only (HEAD/ARMOR/SHOES × SET1/SET2/SET3 × T2-T8 × enchantments 0-4)"
+    limitation_single_material: |
+      Each row can only hold ONE material. Items requiring 2+ materials (faction weapons,
+      mounts, transformation weapons, furniture, refined materials) cannot be properly
+      represented in the current schema without multiple rows per product.
+    current_pct_of_total: "8.2%"
+
+  missing_categories:
+    critical_high_volume:
+      - category: "weapon"
+        craftable_count: 754
+        has_enchantments: 645
+        note: "All weapons including faction variants — biggest profit potential"
+      - category: "equipmentitem (non-cloth)"
+        description: "Plate armor, leather armor, capes, bags, offhands, gatherer gear"
+        note: "Current CSV only covers cloth armor (SET1/SET2/SET3)"
+      - category: "simpleitem (refined materials)"
+        craftable_count: 1364
+        note: "Refining is high-volume, low-margin — focus-intensive players love this"
+      - category: "consumableitem"
+        craftable_count: 104
+        note: "Potions and food — high volume, enchantment tiers"
+    medium_priority:
+      - category: "mount"
+        craftable_count: 108
+      - category: "furnitureitem"
+        craftable_count: 199
+      - category: "transformationweapon"
+        craftable_count: 41
+    low_priority:
+      - category: "consumablefrominventoryitem"
+        craftable_count: 322
+        note: "Many are vanity/unlock items, not market-traded"
+      - category: "journalitem"
+        craftable_count: 133
+        note: "Silver purchases, not craftable"
+      - category: "crystalleagueitem"
+        craftable_count: 29
+        note: "Silver purchases"
+
+  schema_design_decision:
+    question: "How to represent multi-resource recipes in recipes.csv?"
+    options:
+      - option: "Multiple rows per product"
+        description: "One row per material per product. Product T4_2H_BOW_KEEPER gets 2 rows."
+        pros: "No schema change needed. Current load_recipes() works."
+        cons: "Grouping logic needed in scoring.py. focus_cost duplicated across rows."
+      - option: "JSON materials column"
+        description: "Replace material_id/material_qty with JSON: [{id, qty}, ...]"
+        pros: "Clean 1:1 product:row. Supports N materials."
+        cons: "Breaks current CSV parsing. More complex."
+      - option: "Expanded columns"
+        description: "material_id_1, material_qty_1, material_id_2, material_qty_2, ..."
+        pros: "Still plain CSV, easy to read."
+        cons: "Max materials limited. Sparse for single-material items."
+    recommendation_note: "This is a DESIGN DECISION for the planner — not a research recommendation."
+
+# ==============================================================
+# SECTION 9: PARSING RULES FOR AUTO-GENERATION
+# ==============================================================
+
+parsing_rules:
+  description: |
+    Rules a parser must follow to correctly extract recipes from items.json.
+    These are FACTUAL observations from the data, not implementation suggestions.
+
+  rule_1_normalize_collections:
+    description: "Both craftingrequirements and craftresource can be dict or list. Always normalize to list."
+    pattern: |
+      if isinstance(cr, dict): cr = [cr]
+      if isinstance(res, dict): res = [res]
+
+  rule_2_skip_swap_transactions:
+    description: "Items with @swaptransaction=true are purchases, not crafts."
+    filter: "Skip if craftingrequirements has @swaptransaction == 'true'"
+
+  rule_3_enchantments_are_separate_products:
+    description: |
+      Each enchantment level is a distinct product with distinct recipe.
+      Product ID convention: {base_uniquename}@{enchantmentlevel}
+      Example: T4_HEAD_CLOTH_SET1@2 uses T4_CLOTH_LEVEL2 instead of T4_CLOTH.
+
+  rule_4_alternative_recipes:
+    description: |
+      When craftingrequirements is a list, each element is an ALTERNATIVE way to craft.
+      Typically [standard_recipe, token_recipe]. For profit calculations, use index [0] (standard).
+
+  rule_5_amountcrafted:
+    description: |
+      Some items produce multiple outputs per craft (@amountcrafted > 1).
+      Material cost per unit = total_material_cost / amountcrafted.
+      Common: potions (5), food (10), refined materials (1).
+
+  rule_6_maxreturnamount_zero:
+    description: |
+      Resources with @maxreturnamount=0 (artefacts, grown animals, alchemy components)
+      are NOT subject to resource return rate. Only standard materials benefit from RRR.
+
+  rule_7_craftingcategory_maps_to_city_bonus:
+    description: |
+      The @craftingcategory field on each item maps 1:1 to craftingmodifier @name
+      in craftingmodifiers.json. This determines which city bonus applies.
+
+  rule_8_focus_cost_scaling:
+    description: |
+      Focus cost increases with enchantment level.
+      Pattern for T4_HEAD_CLOTH_SET1: base=429, @1=750, @2=1313, @3=2298, @4=4021
+      Roughly 1.75x multiplier per enchantment level.
+
+# ==============================================================
+# SECTION 10: craftingmodifiers.json SCHEMA (SUMMARY)
+# ==============================================================
+
+craftingmodifiers_schema:
+  root_key: "craftingmodifiers"
+  sections:
+    refiningcategory:
+      description: "5 refining categories: fiber, ore, rock, wood, hide"
+      fields: ["@name", "@bonusvalue"]
+    craftinglocation:
+      description: "Array of location objects with crafting bonuses"
+      polymorphism: "Single location by @clusterid, or zone ranges by @continent/@biome/@clusterquality"
+
+  royal_city_bonuses:
+    - clusterid: "0000"
+      city: "Thetford (Swamp)"
+      refining_bonus: "ore=0.40"
+      craft_bonuses: "mace=0.15, naturestaff=0.15, firestaff=0.15, leather_armor=0.15, cloth_helmet=0.15"
+    - clusterid: "1000"
+      city: "Lymhurst (Forest)"
+      refining_bonus: "fiber=0.40"
+      craft_bonuses: "sword=0.15, bow=0.15, arcanestaff=0.15, leather_helmet=0.15, leather_shoes=0.15"
+    - clusterid: "2000"
+      city: "Bridgewatch (Steppe)"
+      refining_bonus: "rock=0.40"
+      craft_bonuses: "crossbow=0.15, dagger=0.15, cursestaff=0.15, plate_armor=0.15, cloth_shoes=0.15"
+    - clusterid: "3004"
+      city: "Martlock (Highland)"
+      refining_bonus: "hide=0.40"
+      craft_bonuses: "axe=0.15, quarterstaff=0.15, froststaff=0.15, plate_shoes=0.15, offhand=0.15"
+    - clusterid: "4000"
+      city: "Fort Sterling (Mountain)"
+      refining_bonus: "wood=0.40"
+      craft_bonuses: "hammer=0.15, spear=0.15, holystaff=0.15, plate_helmet=0.15, cloth_armor=0.15"
+    - clusterid: "3003"
+      city: "Caerleon"
+      craft_bonuses: "gatherergear=0.15, tools=0.15, food=0.15, knuckles=0.15, shapeshifterstaff=0.15"
+    - clusterid: "5000"
+      city: "Brecilien"
+      craft_bonuses: "cape=0.15, bag=0.15, potion=0.15"
+
+  conquerors_halls:
+    - clusterid: "4300"
+      name: "Warrior Hall"
+      craftingbonus: "0.18"
+      categories: "axe, crossbow, hammer, mace, sword, knuckles + plate armor"
+    - clusterid: "1012"
+      name: "Hunter Hall"
+      craftingbonus: "0.18"
+      categories: "bow, dagger, quarterstaff, spear, naturestaff, shapeshifterstaff + leather armor"
+    - clusterid: "0008"
+      name: "Mage Hall"
+      craftingbonus: "0.18"
+      categories: "arcanestaff, cursestaff, firestaff, froststaff, holystaff + cloth armor"
+
+  outlands_scaling:
+    pattern: "@continent=OUTLANDS, @biome=xxx, @clusterquality=Q1-Q6"
+    values: "Q1=0.01, Q2=0.03, Q3=0.06, Q4=0.11, Q5=0.18, Q6=0.26"
+
+# ==============================================================
+# SECTION 11: OPEN QUESTIONS & GAPS
+# ==============================================================
+
+open_questions:
+  - question: "Should the auto-generator include ALL 3,982 craftable items or filter to market-relevant ones?"
+    context: |
+      Many items (crystal league tokens, journals, farmable seeds) are silver purchases or
+      non-tradeable. Including them wastes API calls for price lookups.
+    type: decision_blocker
+    affects: ["recipe_auto_generation", "api_rate_management"]
+
+  - question: "How should multi-material recipes be represented in recipes.csv?"
+    context: |
+      Current schema (1 material per row) cannot handle faction weapons (2 materials),
+      transformation weapons (3 materials), or mounts (animal + material).
+      See schema_design_decision section for options.
+    type: decision_blocker
+    affects: ["recipes_csv_schema", "scoring_engine", "recipe_auto_generation"]
+
+  - question: "Should alternative recipes (craftingrequirements as list) be included?"
+    context: |
+      812 items have alternative recipes (usually standard + token variant).
+      Token recipes use faction tokens which are harder to price.
+    type: nice_to_know
+    affects: ["recipe_auto_generation"]
+
+gaps:
+  - area: "formatted/items.json vs items.json"
+    description: "Did not verify if formatted/items.json has identical content or additional processing"
+    impact: nice_to_know
+    affects: []
+
+  - area: "Albion API item_id format for enchanted items"
+    description: |
+      items.json uses T4_HEAD_CLOTH_SET1 with separate enchantment objects.
+      Albion API price endpoints use T4_HEAD_CLOTH_SET1@1 for enchanted items.
+      Need to confirm this convention is consistent across all categories.
+    impact: research_blocker
+    affects: ["recipe_auto_generation", "api_price_lookups"]
+
+  - area: "Black Market vs Royal Market pricing differences"
+    description: "Items sold on Black Market (equipment) vs marketplace (consumables) have different pricing dynamics. Not researched in this scope."
+    impact: nice_to_know
+    affects: ["profit_calculation"]

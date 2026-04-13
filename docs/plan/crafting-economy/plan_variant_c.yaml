@@ -1,0 +1,1351 @@
+plan_id: crafting-economy
+variant: c
+approach: |
+  Speed-first: Maximum parallelism, minimum waves. Backend and frontend start simultaneously
+  from wave 1 using pre-agreed API contracts (Pydantic schemas + TypeScript types).
+  All 7 foundation tasks run in parallel with zero dependencies.
+  Accept higher integration risk in exchange for 4-wave completion.
+  Black Market logic embedded into core tasks rather than separate feature wave.
+objective: |
+  Evolve the Albion Craft Ranker from a CLI tool covering 90 cloth armor items to a
+  full-stack web application (FastAPI + Next.js) covering 3,982+ craftable items with
+  dynamic RRR, focus optimization, cross-city optimization, optional Black Market,
+  and return_rate_pct as the primary visible metric.
+created_at: "2026-04-12T00:00:00Z"
+created_by: gem-planner
+status: pending
+research_confidence: high
+
+plan_metrics:
+  total_tasks: 15
+  total_waves: 4
+  wave_1_task_count: 7
+  total_dependencies: 26
+  risk_score: high
+  estimated_complexity: complex
+
+tldr: |
+  4-wave plan with 7 parallel foundation tasks in wave 1 (recipe parser, RRR engine,
+  API client v2, shared schemas, scoring v2, Next.js scaffold, UI design system).
+  Wave 2 builds backend server + frontend pages in parallel using contracts from wave 1.
+  Wave 3 wires everything together. Wave 4 validates with E2E tests and writes docs.
+  15 total tasks. High risk due to aggressive parallelism — mitigated by strict contracts.
+
+open_questions:
+  - "ao-bin-dumps items.json exact field paths for enchantment tiers — verified in research but parser must handle edge cases"
+  - "Brecilien crafting bonuses — newer city, may not be in older craftingmodifiers.json versions"
+
+pre_mortem:
+  overall_risk_level: high
+  critical_failure_modes:
+    - scenario: "Wave 2 integration mismatches — FastAPI response shapes don't match TypeScript types"
+      likelihood: medium
+      impact: high
+      mitigation: "Wave 1 produces shared Pydantic schemas (c_004) that auto-generate TypeScript types. Both backend and frontend consume the same contract."
+    - scenario: "items.json polymorphism causes parser to miss craftable items (coverage < 3500)"
+      likelihood: medium
+      impact: critical
+      mitigation: "c_001 includes validation step counting parsed items. Acceptance criterion: ≥3500 items. Research findings document all polymorphic patterns (dict→list for craftresource, craftingrequirements)."
+    - scenario: "AODP API rate limits block cross-city price fetching (7+ cities × 3982 items)"
+      likelihood: high
+      impact: high
+      mitigation: "c_003 implements aggressive batching (120 items/request), cache layer with TTL, and staggered refresh. Cross-city fetches prioritize user-selected cities."
+    - scenario: "Scoring engine v2 produces different rankings than expected due to RRR/tax formula changes"
+      likelihood: medium
+      impact: medium
+      mitigation: "c_005 includes unit tests comparing known-good calculations from research (e.g., T4_CLOTH in Lymhurst = 24.8% RRR). Acceptance criteria include specific verification values."
+    - scenario: "Frontend ranking page too slow with 3982+ items"
+      likelihood: medium
+      impact: medium
+      mitigation: "Backend pagination (default 100 items per page). Frontend virtual scrolling. API response time target: < 2s for filtered results."
+  assumptions:
+    - "ao-bin-dumps items.json and craftingmodifiers.json are available and parseable (verified in research phase)"
+    - "AODP API v2 endpoints remain stable (west.albion-online-data.com)"
+    - "Python 3.11+ available for FastAPI with async support"
+    - "Node.js 18+ available for Next.js 14"
+    - "Current albion_client.py retry logic (429 backoff) is sufficient for production load"
+    - "Premium tax rate (4%) is the default — Normal (8%) offered as toggle"
+
+implementation_specification:
+  code_structure: |
+    Monorepo with backend (Python/FastAPI) and frontend (Next.js/TypeScript) in separate directories.
+    Backend extends existing src/ with new modules. Frontend is a new top-level directory.
+    Shared contract via Pydantic schemas that generate TypeScript types.
+  affected_areas:
+    - "src/scoring.py — heavy rewrite for v2 scoring with dynamic RRR, multi-material, BM modes"
+    - "src/albion_client.py — extend for multi-city batching, BM location support"
+    - "src/ — new modules: recipe_parser.py, rrr_engine.py, cross_city.py, schemas.py"
+    - "src/api/ — new FastAPI application with routes, cache, background tasks"
+    - "frontend/ — new Next.js application with ranking table, filters, item detail"
+    - "requirements.txt — add fastapi, uvicorn, pydantic, httpx"
+    - "data/ — recipes.csv replaced by auto-generated recipe data from items.json"
+  component_details:
+    - component: "RecipeParser"
+      responsibility: "Parse ao-bin-dumps/items.json to extract all craftable recipes with 1:N materials, enchantments, artifact detection"
+      interfaces:
+        - "parse_items(items_json_path) → List[Recipe]"
+        - "Recipe dataclass: product_id, category, tier, enchantment, is_artifact, materials: List[RecipeMaterial]"
+        - "RecipeMaterial dataclass: material_id, quantity, is_artifact_component (no RRR if True)"
+    - component: "RRREngine"
+      responsibility: "Calculate dynamic Resource Return Rate per item based on city, category, focus, specialization"
+      interfaces:
+        - "load_modifiers(craftingmodifiers_json_path) → CityModifiers"
+        - "calculate_rrr(category, city, use_focus, spec_bonus) → float"
+        - "RRR formula: 1 - 1/(1 + ProductionBonus/100)"
+    - component: "ScoringEngine v2"
+      responsibility: "Rank items by configurable weighted metrics including return_rate_pct as primary visible metric"
+      interfaces:
+        - "rank_items_v2(recipes, prices, rrr_engine, config) → List[RankedItemV2]"
+        - "RankedItemV2: product_id, material_cost, effective_cost, revenue, profit, return_rate_pct, profit_per_focus, liquidity_score, freshness_score, final_score, best_city, sell_strategy"
+    - component: "CrossCityOptimizer"
+      responsibility: "For each item, evaluate profitability across all cities and recommend the best one"
+      interfaces:
+        - "optimize(item_id, recipes, prices, rrr_engine) → List[CityResult]"
+        - "CityResult: city, rrr, profit, return_rate_pct, is_best"
+    - component: "FastAPI Backend"
+      responsibility: "REST API serving ranked items with filters, city bonuses, config. In-memory cache with TTL."
+      interfaces:
+        - "GET /api/items?city=&category=&tier=&enchantment=&sell_strategy=&sort_by=&page=&per_page="
+        - "GET /api/items/{item_id}"
+        - "GET /api/cities"
+        - "GET /api/config"
+    - component: "Next.js Dashboard"
+      responsibility: "Responsive web UI with sortable ranking table, filters, BM toggle, item detail with cost breakdown"
+      interfaces:
+        - "/ — Ranking page with RankingTable, FilterBar, WeightConfig, BlackMarketToggle"
+        - "/items/[id] — Item detail with cost breakdown, city comparison, price history"
+  dependencies:
+    - component: "FastAPI Backend"
+      relationship: "Imports RecipeParser, RRREngine, ScoringEngine, CrossCityOptimizer, AlbionAPIClient"
+    - component: "Next.js Dashboard"
+      relationship: "Consumes FastAPI REST endpoints via fetch/SWR. Types generated from Pydantic schemas."
+    - component: "ScoringEngine v2"
+      relationship: "Uses RRREngine for dynamic rates, RecipeParser for 1:N materials, AlbionAPIClient for prices"
+    - component: "CrossCityOptimizer"
+      relationship: "Uses RRREngine + AlbionAPIClient to compare cities"
+  integration_points:
+    - "FastAPI ↔ Next.js: REST API with JSON responses matching Pydantic schemas"
+    - "RecipeParser → ScoringEngine: Recipe/RecipeMaterial dataclasses"
+    - "RRREngine → ScoringEngine: calculate_rrr() function"
+    - "AlbionAPIClient → ScoringEngine/CrossCity: get_prices() with multi-city + BM support"
+    - "ao-bin-dumps static files → RecipeParser/RRREngine at startup"
+
+contracts:
+  - from_task: c_004
+    to_task: c_008
+    interface: "Pydantic response models (RankedItemResponse, CityBonusResponse, ConfigResponse)"
+    format: "Python dataclasses/Pydantic BaseModel in src/schemas.py"
+  - from_task: c_004
+    to_task: c_010
+    interface: "TypeScript type definitions matching Pydantic models"
+    format: "TypeScript interfaces in frontend/src/lib/types.ts"
+  - from_task: c_001
+    to_task: c_008
+    interface: "Recipe and RecipeMaterial dataclasses + parse_items() loader"
+    format: "Python module src/recipe_parser.py exporting parse_items(path) → List[Recipe]"
+  - from_task: c_002
+    to_task: c_008
+    interface: "RRR calculation function + city modifiers loader"
+    format: "Python module src/rrr_engine.py exporting calculate_rrr(category, city, use_focus, spec_bonus) → float"
+  - from_task: c_005
+    to_task: c_008
+    interface: "rank_items_v2() function with new signature accepting RRR engine and config"
+    format: "Python function in src/scoring.py"
+  - from_task: c_003
+    to_task: c_008
+    interface: "Extended AlbionAPIClient with multi-city and BM location support"
+    format: "Python class in src/albion_client.py"
+  - from_task: c_006
+    to_task: c_010
+    interface: "Next.js app shell with layout, routing, Tailwind config"
+    format: "Working Next.js app at frontend/ with npm run dev"
+  - from_task: c_007
+    to_task: c_010
+    interface: "Design tokens (colors, spacing, typography) and component specs"
+    format: "Tailwind theme config + component wireframe specs"
+  - from_task: c_008
+    to_task: c_012
+    interface: "Running FastAPI server with all /api/* endpoints returning valid JSON"
+    format: "FastAPI app at src/api/app.py, runnable via uvicorn"
+  - from_task: c_009
+    to_task: c_008
+    interface: "optimize_city() function integrated into /api/items response"
+    format: "Python function in src/cross_city.py"
+
+# ============================================================
+# WAVE 1 — PARALLEL FOUNDATION
+# All 7 tasks have ZERO dependencies and can execute simultaneously
+# ============================================================
+
+waves:
+  - wave: 1
+    name: "Parallel Foundation"
+    objective: "Build all independent core modules simultaneously — recipe parser, RRR engine, API client, schemas, scoring engine, Next.js scaffold, and UI design system"
+    contracts_in: []
+    contracts_out:
+      - "Recipe/RecipeMaterial dataclasses + parse_items() function"
+      - "calculate_rrr() function + CityModifiers data"
+      - "Extended AlbionAPIClient with multi-city/BM support"
+      - "Pydantic schemas + TypeScript types (shared API contract)"
+      - "rank_items_v2() function with new scoring logic"
+      - "Next.js app shell with routing and Tailwind"
+      - "Design tokens and component specs"
+    tasks:
+      - id: c_001
+        title: "Recipe Auto-Generation Parser"
+        agent: gem-implementer
+        description: |
+          Create src/recipe_parser.py that parses ao-bin-dumps/items.json to extract all
+          craftable recipes. Must handle:
+          - Polymorphism: craftresource can be dict (single material) or list (multiple materials)
+          - Polymorphism: craftingrequirements can be dict (single tier) or list (multiple tiers/enchants)
+          - Artifact detection: items with @maxreturnamount='0' are artifacts (no RRR on their materials)
+          - 1:N relationship: each Recipe has N RecipeMaterial entries
+          - Exclude @swaptransaction=true items (journals, not real crafts)
+          - Extract focus_cost from @craftingfocus attribute
+          - Extract enchantment tiers from @enchantmentlevel
+          - Extract item category from @shopsubcategory or craftingcategory
+
+          Output: Recipe dataclass (product_id, category, tier, enchantment, is_artifact,
+          focus_cost, materials: List[RecipeMaterial]) and RecipeMaterial dataclass
+          (material_id, quantity, is_artifact_component).
+
+          Include a CLI script to download items.json from ao-bin-dumps GitHub release
+          and run the parser, outputting stats (total items parsed, by category, artifacts found).
+        wave: 1
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Cobertura de receitas ≥ 3,500 itens craftáveis"
+          - "Materiais de artefato não recebem RRR"
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "src/scoring.py"
+            description: "Current RecipeLine dataclass to understand existing schema and evolve from"
+          - path: "docs/plan/crafting-economy/research_findings_ao_bin_dumps_data_structures.yaml"
+            description: "Detailed analysis of items.json polymorphic patterns and field paths"
+          - path: "docs/plan/crafting-economy/research_findings_crafting_mechanics.yaml"
+            description: "Artifact identification rules and crafting category mappings"
+        file_targets:
+          - "src/recipe_parser.py"
+          - "src/models.py"
+          - "scripts/download_game_data.py"
+          - "tests/test_recipe_parser.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 3
+            estimated_lines: 250
+            focus_area: "Recipe parsing and data modeling"
+            verification:
+              - "Parser extracts ≥ 3,500 unique craftable items from items.json"
+              - "Artifact items correctly identified via @maxreturnamount='0'"
+              - "1:N materials relationship preserved (e.g., artifact weapons have base materials + artifact component)"
+              - "Enchantment tiers correctly extracted (0-4)"
+              - "Items with @swaptransaction=true excluded"
+            acceptance_criteria:
+              - "parse_items() returns ≥ 3,500 Recipe objects"
+              - "Each Recipe has ≥ 1 RecipeMaterial"
+              - "Artifact materials have is_artifact_component=True"
+              - "Unit tests pass with sample items.json subset"
+            failure_modes:
+              - scenario: "items.json format changed in newer ao-bin-dumps release"
+                likelihood: low
+                impact: high
+                mitigation: "Pin to known working commit hash. Add schema validation on parse."
+              - scenario: "Polymorphic fields missed — some items not parsed"
+                likelihood: medium
+                impact: high
+                mitigation: "Research documents all patterns. Parser logs warnings for unhandled structures. Validation counts total items."
+            tech_stack:
+              - "Python 3.11+"
+              - "dataclasses"
+              - "json (stdlib)"
+            test_coverage: "Unit tests for polymorphic parsing, artifact detection, enchantment extraction"
+
+      - id: c_002
+        title: "Dynamic RRR Engine"
+        agent: gem-implementer
+        description: |
+          Create src/rrr_engine.py that calculates Resource Return Rate dynamically per item
+          based on city and category. Must:
+          - Parse ao-bin-dumps/craftingmodifiers.json to extract city bonuses by crafting category
+          - Implement RRR formula: RRR = 1 - 1/(1 + ProductionBonus/100)
+          - Base production bonus: 15.2% (no city bonus, no focus)
+          - City bonus: +15% for matching category (e.g., cloth in Lymhurst)
+          - Focus bonus: +43.5% flat added to production bonus when focus is used
+          - Support all 9 locations: 7 Royal cities + Caerleon + Brecilien
+          - Expose calculate_rrr(category, city, use_focus, spec_bonus=0) → float
+          - Artifacts excluded: if is_artifact_component=True, return RRR=0.0
+
+          Known verification values from research:
+          - No bonus, no focus: RRR = 15.2% (ProductionBonus = 17.9%)
+          - City bonus, no focus: RRR = 24.8% (ProductionBonus = 32.9%)
+          - City bonus + focus: RRR = 47.9% (ProductionBonus = 92.0%)
+        wave: 1
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "RRR calculado dinamicamente por cidade/categoria"
+          - "Materiais de artefato não recebem RRR"
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "docs/plan/crafting-economy/research_findings_crafting_mechanics.yaml"
+            description: "RRR formula, city bonus values, focus bonus calculations"
+          - path: "docs/plan/crafting-economy/consolidated_research_report.yaml"
+            description: "City specialization mappings"
+        file_targets:
+          - "src/rrr_engine.py"
+          - "tests/test_rrr_engine.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 2
+            estimated_lines: 180
+            focus_area: "RRR calculation and city bonus parsing"
+            verification:
+              - "calculate_rrr('cloth', 'Lymhurst', False) ≈ 0.248"
+              - "calculate_rrr('cloth', 'Bridgewatch', False) ≈ 0.152"
+              - "calculate_rrr('cloth', 'Lymhurst', True) ≈ 0.479"
+              - "Artifact materials return RRR = 0.0"
+            acceptance_criteria:
+              - "RRR values match known verification values within 1% tolerance"
+              - "All 9 cities supported with correct category bonuses"
+              - "Focus toggle changes RRR correctly"
+              - "craftingmodifiers.json parsed without errors"
+            failure_modes:
+              - scenario: "craftingmodifiers.json missing Brecilien data"
+                likelihood: medium
+                impact: low
+                mitigation: "Fallback to base RRR (15.2%) for unknown cities. Log warning."
+            tech_stack:
+              - "Python 3.11+"
+              - "json (stdlib)"
+            test_coverage: "Unit tests for each city/category/focus combination against known values"
+
+      - id: c_003
+        title: "API Client v2 — Multi-City & Black Market"
+        agent: gem-implementer
+        description: |
+          Extend src/albion_client.py to support:
+          - Multi-city price fetching: get_prices() accepts list of cities (all 9 + 'Black Market')
+          - Black Market location: 'Black Market' as valid location for sell prices
+          - Smarter batching: respect 4096 char URL limit, 120 items/price batch, 40 items/history batch
+          - Rate limit tracking: 180 req/min, 300 req/5min — add internal counter and auto-throttle
+          - Price freshness: expose sell_price_min_date and buy_price_max_date for freshness scoring
+          - Replace urllib with httpx for async support (FastAPI integration)
+          - Connection pooling for repeated requests
+
+          Preserve backward compatibility with existing get_prices() and get_history_bulk() signatures.
+          Add new async variants: aget_prices(), aget_history_bulk().
+        wave: 1
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Black Market toggle funcional"
+          - "Dashboard carrega ranking em < 5 segundos"
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "src/albion_client.py"
+            description: "Current API client implementation to extend"
+          - path: "docs/plan/crafting-economy/research_findings_existing_tools_and_apis.yaml"
+            description: "AODP API rate limits, endpoints, URL constraints"
+        file_targets:
+          - "src/albion_client.py"
+          - "tests/test_albion_client.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 2
+            estimated_lines: 200
+            focus_area: "API client extension for multi-city and async"
+            verification:
+              - "get_prices() accepts 'Black Market' as location"
+              - "Batching respects 120 items/request and 4096 char URL"
+              - "Rate limit counter prevents exceeding 180 req/min"
+              - "Async variants work with FastAPI"
+            acceptance_criteria:
+              - "Black Market prices fetchable via location='Black Market'"
+              - "Multi-city requests batched efficiently"
+              - "httpx async client functional"
+              - "Backward compatible with existing sync calls"
+            failure_modes:
+              - scenario: "httpx migration breaks existing sync code paths"
+                likelihood: medium
+                impact: medium
+                mitigation: "Keep sync wrappers around async calls. Test both paths."
+            tech_stack:
+              - "Python 3.11+"
+              - "httpx"
+            test_coverage: "Unit tests for batching logic, rate limiting, BM location handling"
+
+      - id: c_004
+        title: "Shared Data Schemas — Pydantic + TypeScript"
+        agent: gem-implementer
+        description: |
+          Create the API contract layer that both backend and frontend consume:
+
+          1. src/schemas.py — Pydantic v2 models:
+             - RankedItemResponse: product_id, name, category, tier, enchantment, material_cost,
+               effective_cost, sell_price, net_revenue, profit, return_rate_pct, profit_per_focus,
+               liquidity_score, freshness_score, final_score, best_city, sell_strategy,
+               materials: List[MaterialBreakdown]
+             - MaterialBreakdown: material_id, quantity, unit_price, is_artifact, rrr_applied
+             - CityBonusResponse: city, bonuses: Dict[category, bonus_pct], rrr_values
+             - ConfigResponse: default weights, available cities, categories, tiers
+             - PaginatedResponse[T]: items, total, page, per_page, pages
+             - FilterParams: city, category, tier, enchantment, sell_strategy, sort_by, min_profit
+
+          2. frontend/src/lib/types.ts — TypeScript interfaces matching every Pydantic model.
+             Generated manually (not auto-generated) to ensure clean TS idioms.
+
+          This is THE contract between backend and frontend. Both teams code against these types.
+        wave: 1
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Porcentagem de retorno (margem %) visível no ranking"
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "src/scoring.py"
+            description: "Current RankedItem dataclass — evolve into RankedItemResponse"
+          - path: "docs/PRD.yaml"
+            description: "Scoring metrics and filter requirements"
+        file_targets:
+          - "src/schemas.py"
+          - "frontend/src/lib/types.ts"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 2
+            estimated_lines: 200
+            focus_area: "API contract definition"
+            verification:
+              - "All PRD metrics present in RankedItemResponse (profit, return_rate_pct, profit_per_focus, liquidity_score, freshness_score)"
+              - "TypeScript types match Pydantic models 1:1"
+              - "PaginatedResponse supports generic item type"
+            acceptance_criteria:
+              - "Pydantic models validate with sample data"
+              - "TypeScript types compile without errors"
+              - "return_rate_pct field present and documented"
+              - "All filter params from PRD represented"
+            failure_modes:
+              - scenario: "Schema drift between Pydantic and TypeScript during development"
+                likelihood: medium
+                impact: high
+                mitigation: "Both types defined in this single task. Wave 3 integration validates match."
+            tech_stack:
+              - "Python 3.11+ / Pydantic v2"
+              - "TypeScript 5+"
+            test_coverage: "Pydantic model validation tests with sample data"
+
+      - id: c_005
+        title: "Scoring Engine v2 — Dynamic RRR, Multi-Material, BM Modes"
+        agent: gem-implementer
+        description: |
+          Rewrite src/scoring.py to support the v2 scoring requirements:
+
+          1. Multi-material support: iterate Recipe.materials (1:N) instead of flat RecipeLine
+          2. Dynamic RRR: accept RRR engine instance, calculate per-material RRR
+             - Artifact materials (is_artifact_component=True) get RRR=0.0
+             - Regular materials get RRR from rrr_engine.calculate_rrr()
+          3. Separated taxes: setup_fee (2.5%) + sales_tax (4% Premium / 8% Normal)
+          4. New metrics:
+             - return_rate_pct = (profit / total_material_cost) × 100 — PRIMARY metric
+             - profit_per_focus = (profit_with_focus - profit_without_focus) / focus_cost
+             - freshness_score = inverse of max(sell_price_age, material_price_age)
+          5. Black Market comparison:
+             - Calculate profit for marketplace sell_price AND BM buy_price_max
+             - Return both in result for comparison mode
+          6. Configurable weights via ScoringConfig dataclass
+          7. Material cost strategy: instant_buy (sell_price_min) vs buy_order (buy_price_max)
+
+          Preserve save_ranking_csv() but update columns to match new metrics.
+          Keep backward-compatible rank_items() that wraps rank_items_v2() with defaults.
+        wave: 1
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Porcentagem de retorno (margem %) visível no ranking"
+          - "Taxas separadas corretamente"
+          - "Focus optimization funcional"
+          - "Materiais de artefato não recebem RRR"
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "src/scoring.py"
+            description: "Current scoring engine to rewrite — preserve structure where possible"
+          - path: "docs/PRD.yaml"
+            description: "Scoring metrics, tax formulas, acceptance criteria"
+          - path: "docs/plan/crafting-economy/research_findings_market_dynamics.yaml"
+            description: "Tax breakdown, sell strategies, BM pricing mechanics"
+        file_targets:
+          - "src/scoring.py"
+          - "tests/test_scoring.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 2
+            estimated_lines: 300
+            focus_area: "Scoring algorithm rewrite with dynamic RRR and new metrics"
+            verification:
+              - "return_rate_pct = (profit / material_cost) × 100 for each item"
+              - "Premium tax: 2.5% + 4% = 6.5% total"
+              - "Normal tax: 2.5% + 8% = 10.5% total"
+              - "Artifact material cost calculated at 100% (no RRR)"
+              - "profit_per_focus ranking differs from profit_absolute ranking"
+            acceptance_criteria:
+              - "rank_items_v2() returns RankedItemV2 with all v2 metrics"
+              - "Artifact materials excluded from RRR in cost calculation"
+              - "BM comparison mode returns both marketplace and BM profits"
+              - "Configurable weights via ScoringConfig"
+              - "Unit tests verify tax separation and RRR application"
+            failure_modes:
+              - scenario: "Breaking change in rank_items() signature breaks CLI"
+                likelihood: medium
+                impact: low
+                mitigation: "Keep backward-compatible wrapper. CLI still works with old interface."
+            tech_stack:
+              - "Python 3.11+"
+              - "dataclasses"
+            test_coverage: "Unit tests for each metric, tax modes, artifact handling, BM comparison"
+
+      - id: c_006
+        title: "Next.js Project Scaffold"
+        agent: gem-implementer
+        description: |
+          Initialize frontend/ as a Next.js 14+ app with:
+          - TypeScript strict mode
+          - Tailwind CSS v3 with custom theme (design tokens placeholder)
+          - App Router (src/app/)
+          - Layout with header (app name, server indicator) and main content area
+          - Route structure: / (ranking), /items/[id] (detail)
+          - API client utility: frontend/src/lib/api.ts with typed fetch wrappers
+          - SWR or TanStack Query for data fetching with caching
+          - Environment config: NEXT_PUBLIC_API_URL pointing to FastAPI backend
+          - ESLint + Prettier config
+          - package.json with scripts: dev, build, lint
+
+          NO actual page content yet — just working scaffold that renders "Albion Craft Ranker"
+          on / and "Item Detail" on /items/test.
+        wave: 1
+        priority: medium
+        status: pending
+        prototype: false
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "docs/PRD.yaml"
+            description: "Dashboard feature requirements and route structure"
+        file_targets:
+          - "frontend/package.json"
+          - "frontend/tsconfig.json"
+          - "frontend/tailwind.config.ts"
+          - "frontend/src/app/layout.tsx"
+          - "frontend/src/app/page.tsx"
+          - "frontend/src/app/items/[id]/page.tsx"
+          - "frontend/src/lib/api.ts"
+          - "frontend/.env.local"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 8
+            estimated_lines: 250
+            focus_area: "Next.js project initialization with routing and tooling"
+            verification:
+              - "npm run dev starts without errors"
+              - "/ route renders placeholder"
+              - "/items/test route renders placeholder"
+              - "Tailwind CSS classes apply correctly"
+            acceptance_criteria:
+              - "Next.js app runs on localhost:3000"
+              - "TypeScript compiles with strict mode"
+              - "API client utility has typed fetch functions"
+              - "Environment variable for API URL configured"
+            failure_modes:
+              - scenario: "Dependency version conflicts between Next.js and Tailwind"
+                likelihood: low
+                impact: low
+                mitigation: "Use stable versions. Pin in package.json."
+            tech_stack:
+              - "Next.js 14+"
+              - "TypeScript 5+"
+              - "Tailwind CSS 3"
+              - "SWR or TanStack Query"
+            test_coverage: null
+
+      - id: c_007
+        title: "Dashboard UI Design System"
+        agent: gem-designer
+        description: |
+          Define the visual design system and component specs for the Albion Craft Ranker dashboard:
+
+          1. Design tokens in Tailwind theme:
+             - Color palette: dark theme (Albion-inspired), accent colors for profit/loss
+             - Typography: monospace for numbers, sans-serif for labels
+             - Spacing scale, border radius, shadows
+          2. Component specs (wireframe-level):
+             - RankingTable: columns (rank, item, return_rate_pct, profit, profit_per_focus, city, category, tier)
+               - return_rate_pct as primary column with color coding (green=positive, red=negative)
+               - Sortable headers, alternating row colors
+             - FilterBar: dropdowns for category, tier, enchantment, city + search input
+             - BlackMarketToggle: 3-state toggle (Marketplace / Black Market / Comparison)
+             - WeightConfig: sliders for profit_weight, liquidity_weight, focus_weight
+             - CityComparison: horizontal bar chart comparing profit across cities
+             - ItemDetail: cost breakdown table, material list, price sources
+          3. Responsive breakpoints: mobile-first, table scrolls horizontally on small screens
+          4. Accessibility: WCAG 2.1 AA, keyboard navigable, screen reader labels
+        wave: 1
+        priority: medium
+        status: pending
+        prototype: false
+        dependencies: []
+        conflicts_with: []
+        context_files:
+          - path: "docs/PRD.yaml"
+            description: "Dashboard features, user stories, filter requirements"
+        file_targets:
+          - "frontend/tailwind.config.ts"
+          - "docs/ui-specs.md"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 2
+            estimated_lines: 150
+            focus_area: "Design system definition and component specifications"
+            verification:
+              - "Tailwind theme tokens defined for colors, typography, spacing"
+              - "Component specs cover all PRD dashboard requirements"
+              - "return_rate_pct prominently featured in ranking table spec"
+              - "Responsive design breakpoints specified"
+            acceptance_criteria:
+              - "Design tokens applied to Tailwind config"
+              - "All 6 component specs documented with layout and behavior"
+              - "WCAG 2.1 AA compliance guidelines included"
+              - "Dark theme with Albion-inspired palette"
+            failure_modes:
+              - scenario: "Design specs too abstract for implementer to follow"
+                likelihood: low
+                impact: medium
+                mitigation: "Include concrete Tailwind class examples and layout dimensions"
+
+  # ============================================================
+  # WAVE 2 — BACKEND + FRONTEND IN PARALLEL
+  # Backend builds server from wave 1 modules.
+  # Frontend builds pages from wave 1 scaffold + schemas.
+  # ============================================================
+
+  - wave: 2
+    name: "Backend Server + Frontend Pages"
+    objective: "Build FastAPI server integrating all wave 1 modules AND build frontend pages using shared schemas — both in parallel"
+    contracts_in:
+      - "Recipe dataclasses and parse_items() from c_001"
+      - "calculate_rrr() function from c_002"
+      - "Extended AlbionAPIClient from c_003"
+      - "Pydantic schemas + TypeScript types from c_004"
+      - "rank_items_v2() from c_005"
+      - "Next.js app shell from c_006"
+      - "Design tokens and component specs from c_007"
+    contracts_out:
+      - "Running FastAPI server with /api/items, /api/items/{id}, /api/cities, /api/config"
+      - "Frontend ranking page with table, filters, BM toggle (using mock data)"
+      - "Frontend item detail page with cost breakdown (using mock data)"
+      - "Cross-city optimization integrated into API responses"
+    tasks:
+      - id: c_008
+        title: "FastAPI Server — All Endpoints + Cache + Background Refresh"
+        agent: gem-implementer
+        description: |
+          Create src/api/ directory with the full FastAPI application:
+
+          1. src/api/app.py: FastAPI app factory with lifespan (startup loads recipes, modifiers)
+          2. src/api/routes/items.py:
+             - GET /api/items: paginated ranking with filters (city, category, tier, enchantment,
+               sell_strategy, sort_by, min_profit, page, per_page). Returns PaginatedResponse[RankedItemResponse].
+             - GET /api/items/{item_id}: single item detail with full material breakdown,
+               city comparison (cross-city results), BM vs marketplace comparison.
+          3. src/api/routes/cities.py:
+             - GET /api/cities: all cities with bonuses per category, RRR values
+          4. src/api/routes/config.py:
+             - GET /api/config: default weights, available filters, server info
+          5. src/api/cache.py: in-memory cache with configurable TTL (default 5 min for prices)
+          6. src/api/background.py: BackgroundTasks for periodic price refresh
+          7. CORS middleware configured for Next.js frontend origin
+          8. Error handlers for AODP API failures (rate limit, timeout, stale data)
+
+          Wire together: RecipeParser (c_001) + RRREngine (c_002) + AlbionAPIClient (c_003)
+          + ScoringEngine (c_005) + CrossCityOptimizer (c_009) into the API layer.
+          Use Pydantic schemas from c_004 for response models.
+
+          Add requirements.txt: fastapi, uvicorn[standard], httpx, pydantic>=2.0
+        wave: 2
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Dashboard carrega ranking em < 5 segundos"
+        dependencies:
+          - c_001
+          - c_002
+          - c_003
+          - c_004
+          - c_005
+        conflicts_with: []
+        context_files:
+          - path: "src/main.py"
+            description: "Current CLI entry point — API replaces this as primary interface"
+          - path: "src/schemas.py"
+            description: "Pydantic response models from c_004"
+        file_targets:
+          - "src/api/__init__.py"
+          - "src/api/app.py"
+          - "src/api/routes/__init__.py"
+          - "src/api/routes/items.py"
+          - "src/api/routes/cities.py"
+          - "src/api/routes/config.py"
+          - "src/api/cache.py"
+          - "src/api/background.py"
+          - "requirements.txt"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 9
+            estimated_lines: 300
+            focus_area: "FastAPI application with all endpoints and caching"
+            verification:
+              - "GET /api/items returns paginated RankedItemResponse list"
+              - "GET /api/items/{id} returns full item detail with materials and city comparison"
+              - "Filters narrow results correctly"
+              - "Cache prevents redundant AODP API calls within TTL"
+              - "Response time < 2s for filtered queries"
+            acceptance_criteria:
+              - "All 4 endpoints return valid JSON matching Pydantic schemas"
+              - "Pagination works with page/per_page params"
+              - "CORS allows requests from localhost:3000"
+              - "Background price refresh runs on configurable interval"
+              - "uvicorn src.api.app:app --reload starts without errors"
+            failure_modes:
+              - scenario: "Startup too slow loading 3982+ recipes and fetching all prices"
+                likelihood: high
+                impact: medium
+                mitigation: "Lazy-load prices on first request per city. Pre-load recipes only (static data). Cache aggressively."
+            tech_stack:
+              - "FastAPI"
+              - "uvicorn"
+              - "Pydantic v2"
+              - "httpx (async)"
+            test_coverage: "Integration tests for each endpoint with mock AODP responses"
+            requires_review: true
+            review_depth: standard
+            review_security_sensitive: false
+
+      - id: c_009
+        title: "Cross-City Optimizer"
+        agent: gem-implementer
+        description: |
+          Create src/cross_city.py that optimizes crafting city selection:
+
+          1. For a given item, calculate profit across all applicable cities
+          2. Uses RRREngine to get city-specific RRR for the item's category
+          3. Uses AlbionAPIClient to get material prices in each city
+          4. Returns ranked list of CityResult (city, rrr, effective_cost, profit, return_rate_pct, is_best)
+          5. optimize_cities(recipe, rrr_engine, client, sell_city, config) → List[CityResult]
+          6. Batch optimization: optimize_all(recipes, ...) → Dict[product_id, best_city]
+
+          Cities to evaluate: Bridgewatch, Fort Sterling, Lymhurst, Martlock, Thetford,
+          Caerleon, Brecilien (+ optionally custom list).
+
+          Integration note: c_008 will call optimize_cities() for /api/items/{id} detail view
+          and optimize_all() for the best_city field in ranking responses.
+        wave: 2
+        priority: medium
+        status: pending
+        prototype: false
+        covers:
+          - "Cross-city optimization funcional"
+        dependencies:
+          - c_002
+          - c_003
+        conflicts_with: []
+        context_files:
+          - path: "src/rrr_engine.py"
+            description: "RRR calculation function from c_002"
+          - path: "src/albion_client.py"
+            description: "API client for multi-city prices from c_003"
+        file_targets:
+          - "src/cross_city.py"
+          - "tests/test_cross_city.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 2
+            estimated_lines: 150
+            focus_area: "Cross-city profitability comparison"
+            verification:
+              - "Same item shows different RRR in different cities"
+              - "Best city recommendation changes based on city bonuses"
+              - "Profit calculations account for city-specific material prices"
+            acceptance_criteria:
+              - "optimize_cities() returns results for all 7+ cities"
+              - "is_best flag correctly identifies highest-profit city"
+              - "Works with both focus and no-focus modes"
+              - "Unit tests with mock prices verify city comparison logic"
+            failure_modes:
+              - scenario: "Material prices unavailable in some cities"
+                likelihood: high
+                impact: low
+                mitigation: "Skip cities with missing price data. Return partial results with warning."
+            tech_stack:
+              - "Python 3.11+"
+            test_coverage: "Unit tests with mock prices for city comparison scenarios"
+
+      - id: c_010
+        title: "Frontend Ranking Page — Table, Filters, BM Toggle"
+        agent: gem-implementer
+        description: |
+          Build the main ranking page at frontend/src/app/page.tsx:
+
+          1. RankingTable component:
+             - Columns: rank, item name, return_rate_pct (PRIMARY, color-coded), profit, profit_per_focus,
+               best_city, category, tier, enchantment
+             - Sortable by clicking column headers
+             - return_rate_pct prominently displayed — green for positive, red for negative
+             - Pagination controls (prev/next, page size selector)
+          2. FilterBar component:
+             - Category dropdown (populated from /api/config)
+             - Tier dropdown (T2-T8)
+             - Enchantment dropdown (0-4)
+             - City dropdown (all cities from /api/cities)
+             - Search input for item name
+             - Min profit filter
+          3. BlackMarketToggle component:
+             - 3-state: Marketplace / Black Market / Comparison
+             - Updates sell_strategy query param
+          4. WeightConfig component:
+             - Sliders for profit_weight, liquidity_weight, focus_weight
+             - Submit button to recalculate ranking
+          5. Data fetching via SWR/TanStack Query with proper loading/error states
+          6. Use TypeScript types from c_004 (frontend/src/lib/types.ts)
+
+          Use mock data (hardcoded JSON matching schema) until integration in wave 3.
+          Apply design tokens from c_007.
+        wave: 2
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Porcentagem de retorno (margem %) visível no ranking"
+          - "Black Market toggle funcional"
+        dependencies:
+          - c_004
+          - c_006
+          - c_007
+        conflicts_with:
+          - c_011
+        context_files:
+          - path: "frontend/src/lib/types.ts"
+            description: "TypeScript types from c_004"
+          - path: "frontend/tailwind.config.ts"
+            description: "Design tokens from c_007"
+          - path: "docs/ui-specs.md"
+            description: "Component specs from c_007"
+        file_targets:
+          - "frontend/src/app/page.tsx"
+          - "frontend/src/components/RankingTable.tsx"
+          - "frontend/src/components/FilterBar.tsx"
+          - "frontend/src/components/BlackMarketToggle.tsx"
+          - "frontend/src/components/WeightConfig.tsx"
+          - "frontend/src/hooks/useItems.ts"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 6
+            estimated_lines: 300
+            focus_area: "Main ranking page with all interactive components"
+            verification:
+              - "Ranking table displays return_rate_pct as primary column"
+              - "Sorting by any column works"
+              - "Filters update URL params and table content"
+              - "BM toggle switches between 3 modes"
+              - "Weight sliders adjust values"
+            acceptance_criteria:
+              - "Table renders with mock data showing all required columns"
+              - "return_rate_pct color-coded: green > 0, red < 0"
+              - "All filter dropdowns render and update state"
+              - "BM toggle has 3 states with visual feedback"
+              - "Responsive: table scrolls horizontally on mobile"
+            failure_modes:
+              - scenario: "Mock data shape doesn't match final API response"
+                likelihood: medium
+                impact: medium
+                mitigation: "Mock data generated from TypeScript types (c_004). Integration in wave 3 catches mismatches."
+            tech_stack:
+              - "Next.js 14+ / React"
+              - "TypeScript"
+              - "Tailwind CSS"
+              - "SWR or TanStack Query"
+            test_coverage: null
+
+      - id: c_011
+        title: "Frontend Item Detail Page"
+        agent: gem-implementer
+        description: |
+          Build the item detail page at frontend/src/app/items/[id]/page.tsx:
+
+          1. Item header: name, tier, enchantment, category, icon placeholder
+          2. Cost breakdown table:
+             - Each material: name, quantity, unit_price, RRR applied (yes/no), effective_cost
+             - Total material cost, effective cost after RRR
+             - Setup fee (2.5%), sales tax (4%/8%), net revenue, profit
+             - return_rate_pct prominently displayed
+          3. City comparison section:
+             - Horizontal list/chart of all cities with profit in each
+             - Best city highlighted
+          4. Black Market comparison:
+             - Side-by-side: Marketplace price vs BM price, profit diff
+          5. Price source info:
+             - Data freshness indicators (when prices were last updated)
+             - Sell price source, material price sources
+
+          Use mock data matching c_004 types until wave 3 integration.
+        wave: 2
+        priority: medium
+        status: pending
+        prototype: false
+        dependencies:
+          - c_004
+          - c_006
+          - c_007
+        conflicts_with:
+          - c_010
+        context_files:
+          - path: "frontend/src/lib/types.ts"
+            description: "TypeScript types from c_004"
+          - path: "docs/ui-specs.md"
+            description: "Component specs from c_007"
+        file_targets:
+          - "frontend/src/app/items/[id]/page.tsx"
+          - "frontend/src/components/CostBreakdown.tsx"
+          - "frontend/src/components/CityComparison.tsx"
+          - "frontend/src/hooks/useItemDetail.ts"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 4
+            estimated_lines: 250
+            focus_area: "Item detail page with cost breakdown and city comparison"
+            verification:
+              - "Cost breakdown shows each material with RRR status"
+              - "City comparison displays profit for all cities"
+              - "BM vs marketplace comparison renders side-by-side"
+              - "Price freshness indicators visible"
+            acceptance_criteria:
+              - "Item detail renders with mock data"
+              - "Material breakdown table shows RRR applied/not-applied per material"
+              - "City comparison shows at least 7 cities"
+              - "Responsive layout works on mobile"
+            failure_modes:
+              - scenario: "Complex layout breaks on narrow screens"
+                likelihood: medium
+                impact: low
+                mitigation: "Stack sections vertically on mobile. Table scrolls horizontally."
+            tech_stack:
+              - "Next.js 14+ / React"
+              - "TypeScript"
+              - "Tailwind CSS"
+            test_coverage: null
+
+  # ============================================================
+  # WAVE 3 — INTEGRATION + POLISH
+  # Wire frontend to real backend. Designer validates UI.
+  # ============================================================
+
+  - wave: 3
+    name: "Full-Stack Integration + UI Validation"
+    objective: "Connect frontend to live FastAPI backend, replace mock data with real API calls. Designer validates UI against specs."
+    contracts_in:
+      - "Running FastAPI server with all endpoints from c_008"
+      - "Cross-city optimizer integrated from c_009"
+      - "Frontend pages with mock data from c_010, c_011"
+    contracts_out:
+      - "Fully functional web application with live data"
+      - "UI validated against design specs and accessibility requirements"
+    tasks:
+      - id: c_012
+        title: "Full-Stack Integration — Real API + Error Handling + Polish"
+        agent: gem-implementer
+        description: |
+          Wire the frontend to the live FastAPI backend:
+
+          1. Update frontend/src/lib/api.ts to point to real FastAPI endpoints
+          2. Replace all mock data with SWR/TanStack Query hooks hitting /api/*
+          3. Add loading states (skeletons) for all data-fetching components
+          4. Add error states with retry buttons for API failures
+          5. Wire BM toggle to sell_strategy query param in API calls
+          6. Wire filter dropdowns to API filter params
+          7. Wire weight config to scoring config endpoint
+          8. Wire city selector to cross-city optimization
+          9. Add URL-based state: filters/sort persist in URL query params
+          10. Cross-origin: verify CORS works between Next.js (3000) and FastAPI (8000)
+          11. Integration test: full flow from filter → API call → table update
+
+          Also:
+          - Update c_009 cross-city results into c_008 FastAPI /items/{id} response
+          - Verify ranking page loads < 5 seconds with real 100+ item dataset
+          - Handle edge cases: no results, API timeout, stale prices
+        wave: 3
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Dashboard carrega ranking em < 5 segundos"
+          - "Black Market toggle funcional"
+          - "Cross-city optimization funcional"
+          - "Focus optimization funcional"
+        dependencies:
+          - c_008
+          - c_009
+          - c_010
+          - c_011
+        conflicts_with: []
+        context_files:
+          - path: "frontend/src/lib/api.ts"
+            description: "API client to update with real endpoints"
+          - path: "src/api/app.py"
+            description: "FastAPI server to verify endpoints match frontend expectations"
+        file_targets:
+          - "frontend/src/lib/api.ts"
+          - "frontend/src/hooks/useItems.ts"
+          - "frontend/src/hooks/useItemDetail.ts"
+          - "frontend/src/hooks/useCities.ts"
+          - "frontend/src/app/page.tsx"
+          - "frontend/src/app/items/[id]/page.tsx"
+          - "src/api/routes/items.py"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 7
+            estimated_lines: 250
+            focus_area: "Frontend-backend integration and error handling"
+            verification:
+              - "Ranking page loads real data from FastAPI"
+              - "Filters, sorting, pagination work end-to-end"
+              - "BM toggle switches sell_strategy and refreshes data"
+              - "Item detail shows real cost breakdown and city comparison"
+              - "Loading/error states render correctly"
+            acceptance_criteria:
+              - "Zero mock data remaining in frontend"
+              - "Full user flow: open page → filter → sort → click item → see detail"
+              - "BM toggle changes ranking data"
+              - "Page load < 5 seconds with 100+ items"
+              - "CORS works between frontend and backend"
+            failure_modes:
+              - scenario: "Schema mismatch between Pydantic response and TypeScript types"
+                likelihood: medium
+                impact: high
+                mitigation: "Both generated from same c_004 schemas. Runtime validation logs mismatches."
+              - scenario: "Cross-origin errors in production"
+                likelihood: low
+                impact: medium
+                mitigation: "CORS middleware configured in c_008. Verify with actual cross-origin request."
+            tech_stack:
+              - "Next.js / React"
+              - "FastAPI"
+              - "TypeScript"
+            test_coverage: "Integration test for full ranking flow"
+            requires_review: true
+            review_depth: standard
+            review_security_sensitive: false
+
+      - id: c_013
+        title: "UI Validation — Design Review + Accessibility Audit"
+        agent: gem-designer
+        description: |
+          Review the implemented frontend pages against design specs from c_007:
+
+          1. Visual consistency: verify design tokens applied correctly (colors, typography, spacing)
+          2. return_rate_pct prominence: verify it's the most visible metric in ranking table
+          3. Color coding: green for profitable items, red for loss items
+          4. Responsive behavior: test at mobile (375px), tablet (768px), desktop (1280px)
+          5. Accessibility audit:
+             - Keyboard navigation through table, filters, toggles
+             - Screen reader labels on interactive elements
+             - Color contrast ratios (WCAG AA)
+             - Focus indicators visible
+          6. BM toggle: verify 3-state toggle is intuitive and visually clear
+          7. Item detail layout: cost breakdown table readable, city comparison clear
+
+          Output: validation report with pass/fail per component and specific issues to fix.
+          Issues should reference exact components and Tailwind classes to adjust.
+        wave: 3
+        priority: medium
+        status: pending
+        prototype: false
+        dependencies:
+          - c_010
+          - c_011
+        conflicts_with: []
+        context_files:
+          - path: "docs/ui-specs.md"
+            description: "Original design specs to validate against"
+          - path: "frontend/src/components/RankingTable.tsx"
+            description: "Ranking table implementation to review"
+        file_targets:
+          - "docs/ui-validation-report.md"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: small
+            estimated_files: 1
+            estimated_lines: 100
+            focus_area: "Design validation and accessibility"
+            verification:
+              - "All components match design specs"
+              - "Accessibility audit passes WCAG AA"
+              - "Responsive layout works at 3 breakpoints"
+            acceptance_criteria:
+              - "Validation report documents all reviewed components"
+              - "No critical accessibility violations"
+              - "return_rate_pct is visually prominent"
+              - "Responsive behavior verified at 3 breakpoints"
+
+  # ============================================================
+  # WAVE 4 — TESTING + DOCUMENTATION
+  # ============================================================
+
+  - wave: 4
+    name: "E2E Testing + Documentation"
+    objective: "Validate complete user flows with E2E tests. Write documentation for setup, usage, and architecture."
+    contracts_in:
+      - "Fully functional web application from c_012"
+      - "UI validation report from c_013"
+    contracts_out:
+      - "Verified application with E2E test coverage"
+      - "Complete documentation for developers and users"
+    tasks:
+      - id: c_014
+        title: "E2E Testing — Full User Flows"
+        agent: gem-browser-tester
+        description: |
+          Write and execute end-to-end tests for the complete application:
+
+          1. Ranking flow: open dashboard → verify table loads → verify return_rate_pct column visible
+          2. Filter flow: select category → verify table updates → clear filter → verify reset
+          3. Sort flow: click profit column → verify reorder → click return_rate_pct → verify reorder
+          4. BM toggle flow: switch to Black Market → verify prices change → switch to Comparison → verify both visible
+          5. Pagination flow: navigate pages → verify data changes
+          6. Item detail flow: click item in table → verify detail page loads → verify cost breakdown → verify city comparison
+          7. Weight config flow: adjust weights → verify ranking changes
+          8. Error handling: simulate API failure → verify error state → retry → verify recovery
+          9. Performance: verify page load < 5 seconds with real dataset
+          10. Responsive: verify key flows work at mobile viewport
+
+          Apply any accessibility fixes flagged by c_013 validation report.
+        wave: 4
+        priority: high
+        status: pending
+        prototype: false
+        covers:
+          - "Dashboard carrega ranking em < 5 segundos"
+          - "Black Market toggle funcional"
+          - "Cross-city optimization funcional"
+          - "Focus optimization funcional"
+          - "Porcentagem de retorno (margem %) visível no ranking"
+        dependencies:
+          - c_012
+          - c_013
+        conflicts_with: []
+        context_files:
+          - path: "docs/ui-validation-report.md"
+            description: "Accessibility issues to fix from c_013"
+          - path: "frontend/src/app/page.tsx"
+            description: "Ranking page to test"
+        file_targets:
+          - "tests/e2e/ranking.spec.ts"
+          - "tests/e2e/item-detail.spec.ts"
+          - "tests/e2e/filters.spec.ts"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: large
+            estimated_files: 3
+            estimated_lines: 300
+            focus_area: "End-to-end testing of all user flows"
+            verification:
+              - "All 10 test scenarios pass"
+              - "Page load performance < 5 seconds verified"
+              - "Responsive tests pass at mobile viewport"
+            acceptance_criteria:
+              - "All E2E tests pass in CI-ready format"
+              - "No critical bugs found"
+              - "Accessibility issues from c_013 resolved"
+              - "Performance benchmark documented"
+            failure_modes:
+              - scenario: "E2E tests flaky due to AODP API latency"
+                likelihood: high
+                impact: medium
+                mitigation: "Use mock API server for E2E tests. Separate integration tests hit real API."
+            validation_matrix:
+              - scenario: "Ranking page loads with data"
+                steps:
+                  - "Navigate to /"
+                  - "Wait for table to render"
+                  - "Verify return_rate_pct column exists"
+                  - "Verify at least 10 rows visible"
+                expected_result: "Table displays ranked items with return_rate_pct column"
+              - scenario: "Black Market toggle changes data"
+                steps:
+                  - "Navigate to /"
+                  - "Note current top item"
+                  - "Click Black Market toggle"
+                  - "Wait for table refresh"
+                  - "Compare top item"
+                expected_result: "Ranking changes after BM toggle"
+              - scenario: "Item detail shows cost breakdown"
+                steps:
+                  - "Navigate to /"
+                  - "Click first item in table"
+                  - "Verify detail page loads"
+                  - "Verify material breakdown table visible"
+                  - "Verify city comparison section visible"
+                expected_result: "Detail page shows complete cost breakdown and city comparison"
+              - scenario: "Filters narrow results"
+                steps:
+                  - "Navigate to /"
+                  - "Select tier T6 from filter"
+                  - "Verify table shows only T6 items"
+                  - "Select category Weapons"
+                  - "Verify table shows only T6 Weapons"
+                expected_result: "Combined filters correctly narrow results"
+
+      - id: c_015
+        title: "Project Documentation"
+        agent: gem-documentation-writer
+        description: |
+          Write comprehensive documentation for the Albion Craft Ranker v2:
+
+          1. README.md update:
+             - Project overview and feature highlights
+             - Quick start guide (backend + frontend setup)
+             - Architecture diagram (text-based)
+             - API endpoint reference
+             - Configuration options
+          2. docs/architecture.md:
+             - System architecture: FastAPI ↔ Next.js
+             - Data flow: ao-bin-dumps → RecipeParser → ScoringEngine → API → Frontend
+             - Caching strategy and TTL configuration
+             - AODP API rate limit handling
+          3. docs/scoring-guide.md:
+             - Scoring metrics explained (return_rate_pct, profit_per_focus, etc.)
+             - RRR formula and city bonuses
+             - Weight configuration guide
+             - Black Market comparison explained
+          4. CONTRIBUTING.md:
+             - Development setup (Python + Node.js)
+             - Project structure overview
+             - How to add new recipe categories
+             - Testing guide
+
+          Source all facts from code and existing docs. No TBD/TODO placeholders.
+        wave: 4
+        priority: medium
+        status: pending
+        prototype: false
+        dependencies:
+          - c_012
+        conflicts_with: []
+        context_files:
+          - path: "README.md"
+            description: "Current README to update"
+          - path: "docs/PRD.yaml"
+            description: "Feature descriptions and requirements"
+          - path: "src/api/app.py"
+            description: "API endpoints to document"
+          - path: "src/scoring.py"
+            description: "Scoring logic to explain"
+        file_targets:
+          - "README.md"
+          - "docs/architecture.md"
+          - "docs/scoring-guide.md"
+          - "CONTRIBUTING.md"
+        planning_pass: 1
+        planning_history:
+          - pass: 1
+            reason: "Initial plan creation"
+            timestamp: "2026-04-12T00:00:00Z"
+            estimated_effort: medium
+            estimated_files: 4
+            estimated_lines: 300
+            focus_area: "Complete project documentation"
+            verification:
+              - "README quick start works from scratch on clean machine"
+              - "API endpoints match actual implementation"
+              - "Scoring formulas match code logic"
+            acceptance_criteria:
+              - "README covers setup, architecture, API reference"
+              - "Scoring guide explains all metrics with examples"
+              - "No TBD/TODO placeholders"
+              - "All doc pages have accurate, code-verified content"
+            task_type: documentation
+            audience: developers
+            coverage_matrix:
+              - "Project setup and quick start"
+              - "Architecture and data flow"
+              - "Scoring metrics and configuration"
+              - "API endpoint reference"
+              - "Contributing guide"
+
+planning_pass: 1
+planning_history:
+  - pass: 1
+    reason: "Initial plan creation — variant C: maximum parallelism, minimum waves"
+    timestamp: "2026-04-12T00:00:00Z"

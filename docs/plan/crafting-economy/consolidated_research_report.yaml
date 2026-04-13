@@ -1,0 +1,274 @@
+plan_id: crafting-economy
+objective: "Comprehensive research on Albion Online crafting economy to plan a crafting profitability tool"
+focus_areas:
+  - crafting_mechanics
+  - market_dynamics
+  - existing_tools_and_apis
+  - crafting_categories_and_demand
+created_at: "2025-07-13T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+# ============================================================
+# CONSOLIDATED RESEARCH REPORT — Albion Online Crafting Economy
+# ============================================================
+
+tldr: |
+  1. O jogo possui ~7 categorias de crafting (armas, armaduras, acessórios, consumíveis, ferramentas, montarias, gear de coleta) com ~1000+ itens craftáveis.
+  2. Cada cidade Royal oferece bônus de 15% na taxa de retorno de recursos (RRR) para categorias específicas. Focus adiciona +59% flat ao bônus de produção.
+  3. A API do AODP fornece preços em tempo real (180 req/min), e o ao-bin-dumps/items.json pode gerar automaticamente toda a base de receitas.
+  4. O Black Market (Caerleon) é a saída primária para equipamentos — a demanda é gerada por kills de mobs. Consumíveis só vendem no marketplace.
+  5. O albion-craft-ranker atual cobre apenas armaduras de cloth (~3 sets), usa return_rate/tax_rate fixos, e não modela focus cost, artefatos, ou bônus de cidade.
+
+research_metadata:
+  methodology: |
+    Hybrid retrieval: fetch_webpage (Wiki Crafting, Black Market, Marketplace, 3rd Party Tools,
+    ao-bin-dumps GitHub, AODP API docs) + codebase analysis (all .py files, recipes.csv).
+    3 research passes with relationship discovery.
+  scope: "All craftable categories, economic mechanics, API capabilities, competitor tools, exit strategies"
+  confidence: high
+  coverage: 90
+  total_files_analyzed: 7
+  total_web_sources: 8
+  decision_blockers: 1  # Multi-resource RecipeLine schema design (see ao_bin_dumps_data_structures.yaml)
+  research_blockers: 0  # items.json fully analyzed — see research_findings_ao_bin_dumps_data_structures.yaml
+
+# ============================================================
+# SECTION 1: KEY FINDINGS BY FOCUS AREA
+# ============================================================
+
+key_findings:
+  crafting_mechanics:
+    detail_file: "docs/plan/crafting-economy/research_findings_crafting_mechanics.yaml"
+    summary: |
+      - RRR (Resource Return Rate) = 1 - 1/(1 + ProductionBonus/100). Base 15.2%, com bônus de cidade 24.8% (craft) / 36.7% (refino), com focus 47.9% / 53.9%.
+      - Focus Cost Economy (FCE): custo de focus halved a cada 10,000 pontos de FCE. Máximo efetivo ~100,000 FCE.
+      - 7 cidades Royal com especializações + Caerleon (War Gloves/Tools/Food) + Brecilien (Capes/Bags/Potions).
+      - Buildings: crafting stations (Mage's Tower, Warrior's Forge, Hunter's Lodge, etc.) cobram usage fee do dono.
+      - Rest bonus: 30% quality bonus se laborers retornam livros cheios (não implementado no tool atual).
+
+  market_dynamics:
+    detail_file: "docs/plan/crafting-economy/research_findings_market_dynamics.yaml"
+    summary: |
+      - Taxas: 2.5% setup fee (não-reembolsável) + 4% Premium / 8% Normal sales tax.
+      - Black Market: buy orders em Caerleon gerados por mob kills. Preços flutuam com atividade do servidor.
+      - Sell strategies: sell order (esperar comprador) vs instant sell (buy_price_max, sem espera).
+      - Gold exchange: /api/v2/stats/gold.json rastreia taxa silver-to-gold (inflation indicator).
+      - Staleness: sell_price_min_date e buy_price_max_date indicam idade dos dados — dados stale = risco.
+
+  existing_tools_and_apis:
+    detail_file: "docs/plan/crafting-economy/research_findings_existing_tools_and_apis.yaml"
+    summary: |
+      - AODP API: 3 servidores regionais, endpoints /prices, /history, /gold. Rate limit 180 req/min.
+      - ao-bin-dumps: items.json (definições completas), craftingmodifiers.json (bônus de cidade), loot.json (tabelas de drop).
+      - 9 ferramentas concorrentes: Albion Free Market (mais completa em crafting), Tools4Albion, Albionix, etc.
+      - Diferenciais competitivos possíveis: scoring multi-critério (profit + liquidity), profit-per-focus, cross-city optimization.
+
+  crafting_categories_and_demand:
+    detail_file: "docs/plan/crafting-economy/research_findings_crafting_categories_and_demand.yaml"
+    summary: |
+      - 7 categorias: Weapons, Armor (plate/leather/cloth), Accessories, Consumables (food/potions), Tools, Mounts, Gathering Gear.
+      - Refino (ore→bars, hide→leather, etc.) também gera lucro via RRR.
+      - Demanda por tier: T4-T6 alto volume / menor margem, T7-T8 baixo volume / maior margem.
+      - Itens de artefato (Rune/Soul/Relic) não recebem RRR — precisam de tratamento diferenciado no custo.
+      - Consumíveis não vendem no Black Market, mas têm volume diário alto por consumo constante em PvP/PvE.
+
+# ============================================================
+# SECTION 2: CURRENT TOOL GAPS vs IDEAL STATE
+# ============================================================
+
+current_tool_gaps:
+  critical:
+    - gap: "Cobertura de receitas mínima"
+      current: "Apenas armaduras de cloth (~3 sets × 6 tiers × 5 enchants = ~90 itens)"
+      ideal: "Todos os ~1000+ itens craftáveis do jogo"
+      solution: "Parsear ao-bin-dumps/items.json para gerar recipes.csv automaticamente"
+      data_source: "https://github.com/ao-data/ao-bin-dumps/blob/master/items.json"
+
+    - gap: "Return rate fixo (15.2%)"
+      current: "Parâmetro --return-rate fixo para todas as cidades"
+      ideal: "RRR dinâmico baseado em cidade, bônus de cidade, e uso de focus"
+      solution: "Tabela de bônus de produção por cidade/categoria + cálculo automático"
+      data_source: "ao-bin-dumps/craftingmodifiers.json + Wiki Crafting"
+
+    - gap: "Taxa de imposto simplificada (6.5%)"
+      current: "Parâmetro --tax-rate único"
+      ideal: "Setup fee (2.5%) + sales tax (4%/8%) separados, com flag Premium/Normal"
+      solution: "Separar em fee_setup (2.5%) + tax_sales (4% ou 8%)"
+      data_source: "Wiki Marketplace"
+
+    - gap: "Focus cost inutilizado"
+      current: "focus_cost = 0.0 em todas as receitas"
+      ideal: "Focus cost real por item + profit_per_focus como métrica de ranking"
+      solution: "Extrair focus_cost de items.json ou craftingmodifiers.json"
+      data_source: "ao-bin-dumps/items.json"
+
+  important:
+    - gap: "Sem distinção de materiais de artefato"
+      current: "Todos os materiais tratados igualmente no RRR"
+      ideal: "Artefatos (Rune/Soul/Relic) excluídos do RRR — sempre consumidos 100%"
+      solution: "Flag artifact=True no RecipeLine para materiais de artefato"
+      data_source: "ao-bin-dumps/items.json (craftingrequirements)"
+
+    - gap: "Sem preços do Black Market"
+      current: "Só marketplace; usa sell_price_min para estimar receita"
+      ideal: "Comparar sell_price_min (marketplace) vs buy_price_max em Caerleon (Black Market)"
+      solution: "Buscar preços com location=Black Market via API"
+      data_source: "AODP API /prices endpoint com locations=Caerleon (Black Market)"
+
+    - gap: "Sem comparação cross-city"
+      current: "Uma cidade por execução"
+      ideal: "Ranquear item + cidade combinação para encontrar ótimo global"
+      solution: "Loop sobre todas as cidades, calcular profit com bônus específico"
+      data_source: "AODP API + craftingmodifiers.json"
+
+    - gap: "Custo de material via sell_price_min"
+      current: "Materiais custados pelo minor preço de venda (instant buy)"
+      ideal: "Opção de custar via buy orders (buy_price_max) para compra paciente"
+      solution: "Adicionar flag --material-cost-strategy (sell_price_min | buy_price_max)"
+      data_source: "AODP API /prices endpoint (buy_price_max)"
+
+  nice_to_have:
+    - gap: "Sem detecção de dados stale"
+      current: "sell_price_min_date não verificado"
+      ideal: "Alertar quando dados têm mais de X horas"
+      solution: "Verificar sell_price_min_date vs datetime.now()"
+      data_source: "Já disponível no MarketPrice dataclass"
+
+    - gap: "Sem gold exchange tracking"
+      current: "Não implementado"
+      ideal: "Converter silver profit para gold equivalent para medir real value"
+      solution: "Endpoint /api/v2/stats/gold.json"
+      data_source: "AODP API"
+
+    - gap: "Sem quality-aware pricing"
+      current: "quality=1 fixo"
+      ideal: "Ranquear por quality (Normal 1, Good 2, Outstanding 3, Excellent 4, Masterpiece 5)"
+      solution: "Iterar qualities no API call + comparar margem por qualidade"
+      data_source: "AODP API /prices endpoint com qualities param"
+
+# ============================================================
+# SECTION 3: DATA SOURCES MAP
+# ============================================================
+
+data_sources:
+  runtime_data:
+    - source: "AODP API"
+      url: "https://west.albion-online-data.com/api/v2/stats/"
+      provides: ["Current prices (sell/buy)", "Historical prices", "Gold exchange rate"]
+      rate_limit: "180 req/min, 300 req/5min"
+      integration: "Already integrated via AlbionAPIClient"
+
+  static_game_data:
+    - source: "ao-bin-dumps/items.json"
+      url: "https://github.com/ao-data/ao-bin-dumps/blob/master/items.json"
+      provides: ["Item definitions", "Crafting requirements", "Focus costs"]
+      update_frequency: "Updated ~monthly with game patches"
+      integration: "FULLY ANALYZED — see research_findings_ao_bin_dumps_data_structures.yaml"
+      findings: "3,982 craftable items, 44 crafting categories, complete schema documented"
+
+    - source: "ao-bin-dumps/craftingmodifiers.json"
+      url: "https://github.com/ao-data/ao-bin-dumps/blob/master/craftingmodifiers.json"
+      provides: ["City crafting bonuses", "Building modifiers"]
+      integration: "FULLY ANALYZED — see research_findings_ao_bin_dumps_data_structures.yaml"
+      findings: "Royal cities 0.15 craft bonus, 0.40 refining; Conqueror's Halls 0.18; Outlands Q1-Q6 scaling"
+
+    - source: "ao-bin-dumps/loot.json"
+      url: "https://github.com/ao-data/ao-bin-dumps/blob/master/loot.json"
+      provides: ["Loot tables (mob drop rates)", "Black Market demand indicators"]
+      integration: "NOT YET INTEGRATED — nice to have"
+
+  reference_data:
+    - source: "Wiki Crafting"
+      url: "https://wiki.albiononline.com/wiki/Crafting"
+      provides: ["Game mechanics documentation", "RRR formulas", "City bonuses"]
+
+    - source: "Wiki Black Market"
+      url: "https://wiki.albiononline.com/wiki/Black_Market"
+      provides: ["Black Market mechanics", "Demand generation rules"]
+
+# ============================================================
+# SECTION 4: COMPETITIVE POSITIONING
+# ============================================================
+
+competitive_analysis:
+  differentiators_vs_competitors:
+    - differentiator: "Multi-criteria weighted scoring (profit + liquidity)"
+      vs: "Most tools show profit only, not volume-adjusted ranking"
+      status: "Already implemented"
+
+    - differentiator: "Profit per focus point"
+      vs: "Few tools optimize for focus efficiency"
+      status: "Requires focus_cost data from items.json"
+
+    - differentiator: "CLI-first automation"
+      vs: "Most competitors are web-only, not scriptable"
+      status: "Already implemented"
+
+    - differentiator: "Cross-city global optimization"
+      vs: "Most tools check one city at a time"
+      status: "Not yet implemented"
+
+    - differentiator: "Black Market vs Marketplace comparison"
+      vs: "Few tools compare both exit strategies side-by-side"
+      status: "Not yet implemented"
+
+  closest_competitor: "Albion Free Market (albionfreemarkets.com)"
+  competitor_strengths: "Full item coverage, crafting simulation with quality and RRR, web UI"
+  our_advantages: "Weighted scoring, CLI automation, extensible scoring model, open-source"
+
+# ============================================================
+# SECTION 5: OPEN QUESTIONS & GAPS
+# ============================================================
+
+open_questions:
+  - question: "[RESOLVED] Qual o schema exato de items.json para extrair crafting requirements e focus cost?"
+    context: "COMPLETO — documentado em research_findings_ao_bin_dumps_data_structures.yaml"
+    type: resolved
+    affects: ["recipe-expansion", "focus-cost-modeling"]
+
+  - question: "[RESOLVED] Como identificar materiais de artefato no items.json?"
+    context: "COMPLETO — @maxreturnamount='0' identifica artefatos. Documentado no research findings."
+    type: resolved
+    affects: ["artifact-cost-modeling", "rrr-calculation"]
+
+  - question: "[RESOLVED] Qual a estrutura de craftingmodifiers.json?"
+    context: "COMPLETO — documentado em research_findings_ao_bin_dumps_data_structures.yaml, Section 10."
+    type: resolved
+    affects: ["city-bonus-calculation"]
+
+  - question: "Como representar receitas multi-material no recipes.csv?"
+    context: "Aberto — RecipeLine atual suporta 1 material por linha. Itens de artefato precisam 2+. Ver options no research findings."
+    type: decision_blocker
+    affects: ["recipes-csv-schema", "scoring-engine", "recipe-auto-generation"]
+
+  - question: "Como o Black Market determina quantidades demandadas por item/tier?"
+    context: "loot.json pode fornecer pistas, mas o mecanismo exato de geração de ordens é server-side"
+    type: nice_to_know
+    affects: ["black-market-demand-prediction"]
+
+gaps:
+  - area: "[RESOLVED] items.json parsing"
+    description: "COMPLETO — 3,982 craftable items, full schema documented. See research_findings_ao_bin_dumps_data_structures.yaml"
+    impact: resolved
+    affects: ["recipe-expansion", "full-category-ranking"]
+
+  - area: "[RESOLVED] Artifact material flag"
+    description: "COMPLETO — @maxreturnamount='0' no craftresource identifica artefatos não-retornáveis"
+    impact: resolved
+    affects: ["accurate-rrr-modeling"]
+
+  - area: "Multi-resource RecipeLine schema"
+    description: "RecipeLine atual só suporta 1 material. Itens com artefatos/múltiplos recursos precisam de redesign. Ver schema_design_decision no research findings."
+    impact: decision_blocker
+    affects: ["recipe-auto-generation", "scoring-engine"]
+
+  - area: "Building usage fees"
+    description: "Building owners cobram fees arbitrárias (0-999%). Não há API para consultar fees atuais."
+    impact: nice_to_know
+    affects: ["total-cost-modeling"]
+
+  - area: "Premium status assumption"
+    description: "Tool assume Premium (4% tax). Deveria ter flag para Normal (8% tax)."
+    impact: nice_to_know
+    affects: ["tax-calculation"]

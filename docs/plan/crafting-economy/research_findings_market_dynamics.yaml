@@ -1,0 +1,203 @@
+plan_id: crafting-economy
+objective: "Research Albion Online market dynamics, fee structures, and selling strategies"
+focus_area: market_dynamics
+created_at: "2025-07-13T00:00:00Z"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  - Marketplace fees: 2.5% listing/setup fee (non-refundable) + 8% sales tax (4% for Premium). Total effective tax: 10.5% normal, 6.5% Premium.
+  - Black Market in Caerleon: NPCs post buy orders driven by mob kills. Prices rise with unfilled demand. Primary item sink for the economy.
+  - Each city has its own local marketplace - no global auction house. Arbitrage between cities is a valid strategy.
+  - Sell order listings expire after 30 days. Buy orders also expire.
+  - Current codebase uses fixed 6.5% tax_rate, not distinguishing Premium status or the separate 2.5% setup fee.
+
+research_metadata:
+  methodology: "fetch_webpage for Wiki Marketplace and Black Market pages, codebase analysis via read_file"
+  scope: "Marketplace fee structures, Black Market mechanics, selling strategies, price data availability"
+  confidence: high
+  coverage: 90
+  decision_blockers: 0
+  research_blockers: 0
+
+files_analyzed:
+  - file: scoring.py
+    path: src/scoring.py
+    purpose: "Revenue calculation uses net_revenue = sell_price_min * (1 - tax_rate)"
+    key_elements:
+      - element: "net_revenue calculation"
+        type: pattern
+        location: "src/scoring.py:167"
+        description: "Uses single tax_rate parameter (default 6.5%). Does not separately model the 2.5% setup fee."
+    language: python
+    lines: 240
+  - file: albion_client.py
+    path: src/albion_client.py
+    purpose: "Fetches sell_price_min and buy_price_max from market data"
+    key_elements:
+      - element: MarketPrice
+        type: class
+        location: "src/albion_client.py:22"
+        description: "Captures both sell_price_min (lowest sell order) and buy_price_max (highest buy order) per city"
+    language: python
+    lines: 120
+
+patterns_found:
+  - category: architecture
+    pattern: "Simplified tax model"
+    description: |
+      The codebase models tax as a single deduction from sell price: net_revenue = sell_price * (1 - tax_rate).
+      In reality, the 2.5% setup fee is charged on the listing price at time of posting (not on sale),
+      and the sales tax (4% Premium / 8% normal) is charged when the item sells.
+      The combined effect is close to 6.5% for Premium but the setup fee is non-refundable even if unsold.
+    examples:
+      - file: scoring.py
+        location: "src/scoring.py:167"
+        snippet: "net_revenue = product_price.sell_price_min * (1.0 - tax_rate)"
+    prevalence: common
+
+  - category: architecture
+    pattern: "Uses sell_price_min for material buy costs"
+    description: |
+      When calculating material cost, the code uses sell_price_min of materials in the craft city.
+      This assumes buying via instant-buy from sell orders. An alternative is placing buy orders
+      (using buy_price_max as reference) which is cheaper but slower.
+    examples:
+      - file: scoring.py
+        location: "src/scoring.py:152-153"
+        snippet: "unit_material_price = mp.sell_price_min if mp.sell_price_min > 0 else mp.buy_price_max"
+    prevalence: common
+
+related_architecture:
+  components_relevant_to_domain:
+    - component: "Scoring Engine"
+      responsibility: "Applies tax deduction to compute net revenue"
+      location: src/scoring.py
+      relationship_to_domain: "Directly models market fee structure"
+    - component: "API Client"
+      responsibility: "Fetches raw price data from each city's marketplace"
+      location: src/albion_client.py
+      relationship_to_domain: "Provides sell/buy prices that feed into tax calculations"
+  data_flow_involving_domain: |
+    Market prices (per city) -> tax_rate applied as single deduction -> net_revenue computed.
+    Missing: separate setup fee modeling, Premium vs non-Premium distinction, Black Market as sell destination.
+
+related_conventions:
+  naming_patterns_in_domain: "sell_city / craft_city parameters distinguish buy vs sell locations"
+  error_handling_in_domain: "Items with zero sell price are silently skipped"
+
+# ===== MARKET DYNAMICS DEEP FINDINGS =====
+
+market_dynamics_findings:
+  marketplace_structure:
+    description: |
+      Albion Online has LOCAL marketplaces - each city has its own independent auction house.
+      There is no global auction house. Players must physically travel to a city to buy/sell there.
+      This creates price differentials between cities, enabling arbitrage and transport trading.
+    cities_with_marketplaces:
+      - "Martlock"
+      - "Bridgewatch"
+      - "Lymhurst"
+      - "Fort Sterling"
+      - "Thetford"
+      - "Caerleon"
+      - "Brecilien"
+      - "Black Market (Caerleon - special NPC marketplace)"
+    source: "https://wiki.albiononline.com/wiki/Marketplace"
+
+  fee_structure:
+    setup_fee:
+      rate: 2.5%
+      description: |
+        Charged when posting any sell order. Non-refundable even if the item does not sell.
+        Calculated on the listing price. This is a cost of participating in the market.
+      deduction_timing: "At time of listing"
+      refundable: false
+    sales_tax:
+      normal_rate: 8.0%
+      premium_rate: 4.0%
+      description: "Charged on the sale price when the item actually sells."
+      deduction_timing: "At time of sale completion"
+    total_effective_rates:
+      premium: "6.5% effective (2.5% setup + 4% sales tax)"
+      normal: "10.5% effective (2.5% setup + 8% sales tax)"
+    listing_duration: "30 days (sell orders expire after 30 days)"
+    source: "https://wiki.albiononline.com/wiki/Marketplace"
+
+  black_market:
+    location: "Caerleon (underground NPC marketplace)"
+    description: |
+      The Black Market is Albion's primary item sink mechanism. When mobs are killed in the open world,
+      the system generates buy orders on the Black Market for the type of loot those mobs should drop.
+      
+      Key mechanics:
+      1. Mob kills generate buy orders for specific items (matching the mob's potential loot table)
+      2. If buy orders go unfilled, prices rise over time (increased demand)
+      3. Players sell crafted items to the Black Market NPCs at these buy order prices
+      4. Items sold to the Black Market become mob drops for other players
+      5. Higher quality items can be used to fill lower quality buy orders (quality tip)
+      6. Only EQUIPMENT can be sold (no resources, consumables, or other items)
+    pricing_dynamics: |
+      Black Market prices are purely driven by mob kill volume and unfilled demand.
+      When many players are killing mobs in a specific zone/tier, demand rises for that tier's equipment.
+      When crafters fill the orders, prices drop back down.
+      Peak prices often occur during active PvP/PvE hours.
+    sell_strategy: |
+      - Monitor buy order prices via API (buy_price_max in Caerleon/"Black Market" location)
+      - Compare Black Market buy prices vs regular market sell prices
+      - Black Market is often more profitable for mid-tier (T4-T6) items with high mob kill volume
+      - Quality tip: craft higher quality items to fill lower quality orders for bonus silver
+    source: "https://wiki.albiononline.com/wiki/Black_Market"
+
+  selling_strategies:
+    instant_sell:
+      description: "Sell to existing buy orders. Immediate silver, lower price."
+      use_case: "Fast liquidation, high-demand items"
+    sell_order:
+      description: "Post a sell order at desired price. Higher potential price, 2.5% setup fee risk."
+      use_case: "Patient selling of high-margin items"
+    black_market:
+      description: "Sell to Black Market NPCs in Caerleon for mob loot generation."
+      use_case: "Equipment items, especially mid-tier. Can be very profitable during peak PvP hours."
+    cross_city_arbitrage:
+      description: "Buy in one city, transport, sell in another where prices are higher."
+      use_case: "Exploiting price differentials between cities"
+      risk: "Transport through PvP zones, ganking risk"
+
+  api_price_data:
+    description: |
+      The AODP API provides both sell_price_min (lowest sell order) and buy_price_max (highest buy order)
+      for each item/city/quality combination. This enables modeling all selling strategies.
+    relevant_endpoints:
+      current_prices: "/api/v2/stats/prices/{items}.json?locations={cities}&qualities={q}"
+      historical: "/api/v2/stats/history/{items}.json?date={start}&end_date={end}&locations={city}&qualities={q}&time-scale=24"
+    location_identifiers:
+      - "Martlock"
+      - "Bridgewatch"
+      - "Lymhurst"
+      - "Fort Sterling"
+      - "Thetford"
+      - "Caerleon"
+      - "Brecilien"
+      - "Black Market"
+    source: "https://www.albion-online-data.com/api"
+
+open_questions:
+  - question: "Is 'Black Market' the exact location string for the AODP API?"
+    context: "Need to verify the exact location string used to query Black Market prices. Could be 'Black Market' or 'BlackMarket' or a different identifier."
+    type: research
+    affects: ["black-market-price-integration"]
+  - question: "Does the API distinguish between Premium and non-Premium fee structures?"
+    context: "The API returns raw prices; fee calculations are client-side. Need to confirm there's no server-side fee deduction in the data."
+    type: nice_to_know
+    affects: ["fee-modeling"]
+
+gaps:
+  - area: "Black Market location string verification"
+    description: "Need to make a test API call with 'Black Market' as location to verify it returns data."
+    impact: research_blocker
+    affects: ["black-market-integration"]
+  - area: "Price staleness detection"
+    description: "The API returns sell_price_min_date but the codebase doesn't check how old the data is. Stale prices could lead to incorrect profit calculations."
+    impact: nice_to_know
+    affects: ["data-quality"]
