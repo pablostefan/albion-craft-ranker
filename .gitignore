@@ -21,5 +21,4 @@ output/
 Thumbs.db
 
 # IDE
-.vscode/
 .idea/
