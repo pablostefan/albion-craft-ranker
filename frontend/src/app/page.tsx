@@ -7,9 +7,9 @@ import FilterSidebar, {
   ActiveFilterChips,
   type FilterValues,
 } from "@/components/FilterSidebar";
-import { fetchItems, refreshPrices, ApiError } from "@/lib/api";
+import { fetchItems, refreshPrices, ApiError, lookupItems } from "@/lib/api";
 import { useFavorites } from "@/lib/favorites";
-import type { ScoredItem, SortField, SortOrder, MarketMode } from "@/lib/types";
+import type { ScoredItem, LookupItem, SortField, SortOrder, MarketMode } from "@/lib/types";
 
 const DEFAULT_LIMIT = 25;
 
@@ -63,12 +63,14 @@ function RankingDashboard() {
   const activeFilterCount = countActiveFilters(filters);
   const showFavoritesOnly = useFavoritesOnly(searchParams);
   const { favorites, toggleFavorite } = useFavorites();
+  const favoriteIds = [...favorites].join(",");
 
   const [items, setItems] = useState<ScoredItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [trackedItems, setTrackedItems] = useState<LookupItem[]>([]);
 
   const updateParam = useCallback(
     (key: string, value: string) => {
@@ -106,36 +108,65 @@ function RankingDashboard() {
     updateParam("favorites_only", showFavoritesOnly ? "" : "true");
   }, [updateParam, showFavoritesOnly]);
 
-  const displayItems = showFavoritesOnly
-    ? items.filter((i) => favorites.has(i.product_id))
-    : items;
+  const displayItems: (ScoredItem | LookupItem)[] = showFavoritesOnly
+    ? trackedItems
+    : [...items, ...trackedItems];
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setTrackedItems([]);
     try {
-      const res = await fetchItems({
-        sort_by: sortBy,
-        order,
-        offset,
-        limit: DEFAULT_LIMIT,
-        market: filters.market !== "marketplace" ? filters.market : undefined,
-        category: filters.category || undefined,
-        tier: filters.tier ? Number(filters.tier) : undefined,
-        enchantment: filters.enchantment ? Number(filters.enchantment) : undefined,
-        city: filters.city || undefined,
-        quality: filters.quality ? Number(filters.quality) : undefined,
-        min_profit: filters.minProfit ? Number(filters.minProfit) : undefined,
-        w_profit: filters.w_profit ? Number(filters.w_profit) : undefined,
-        w_focus: filters.w_focus ? Number(filters.w_focus) : undefined,
-        w_volume: filters.w_volume ? Number(filters.w_volume) : undefined,
-        w_freshness: filters.w_freshness ? Number(filters.w_freshness) : undefined,
-        exclude_cities: filters.excludeCaerleon === "true" ? "Caerleon" : undefined,
-        use_focus: filters.useFocus === "true" ? true : undefined,
-        name_search: filters.nameSearch || undefined,
-      });
-      setItems(res.items);
-      setTotal(res.total);
+      if (showFavoritesOnly) {
+        if (favoriteIds) {
+          const res = await lookupItems({
+            ids: favoriteIds,
+            city: filters.city || undefined,
+            market: filters.market !== "marketplace" ? filters.market : undefined,
+            use_focus: filters.useFocus === "true" ? true : undefined,
+          });
+          setTrackedItems(res.items);
+        }
+        setItems([]);
+        setTotal(0);
+      } else {
+        const res = await fetchItems({
+          sort_by: sortBy,
+          order,
+          offset,
+          limit: DEFAULT_LIMIT,
+          market: filters.market !== "marketplace" ? filters.market : undefined,
+          category: filters.category || undefined,
+          tier: filters.tier ? Number(filters.tier) : undefined,
+          enchantment: filters.enchantment ? Number(filters.enchantment) : undefined,
+          city: filters.city || undefined,
+          quality: filters.quality ? Number(filters.quality) : undefined,
+          min_profit: filters.minProfit ? Number(filters.minProfit) : undefined,
+          w_profit: filters.w_profit ? Number(filters.w_profit) : undefined,
+          w_focus: filters.w_focus ? Number(filters.w_focus) : undefined,
+          w_volume: filters.w_volume ? Number(filters.w_volume) : undefined,
+          w_freshness: filters.w_freshness ? Number(filters.w_freshness) : undefined,
+          exclude_cities: filters.excludeCaerleon === "true" ? "Caerleon" : undefined,
+          use_focus: filters.useFocus === "true" ? true : undefined,
+          name_search: filters.nameSearch || undefined,
+        });
+        setItems(res.items);
+        setTotal(res.total);
+        if (filters.nameSearch) {
+          try {
+            const lookup = await lookupItems({
+              q: filters.nameSearch,
+              city: filters.city || undefined,
+              market: filters.market !== "marketplace" ? filters.market : undefined,
+              use_focus: filters.useFocus === "true" ? true : undefined,
+            });
+            const rankedIds = new Set(res.items.map((i) => i.product_id));
+            setTrackedItems(lookup.items.filter((i) => !rankedIds.has(i.product_id)));
+          } catch {
+            // lookup is best-effort, don't break the main list
+          }
+        }
+      }
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -147,7 +178,7 @@ function RankingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_volume, filters.w_freshness, filters.excludeCaerleon, filters.useFocus, filters.nameSearch]);
+  }, [showFavoritesOnly, favoriteIds, sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_volume, filters.w_freshness, filters.excludeCaerleon, filters.useFocus, filters.nameSearch]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -188,7 +219,7 @@ function RankingDashboard() {
             borderColor: "var(--color-border-default)",
           }}
         >
-          <SummaryPill label="Total de Itens" value={total.toLocaleString()} />
+          <SummaryPill label="Total de Itens" value={(showFavoritesOnly ? displayItems.length : total).toLocaleString()} />
           <SummaryPill
             label="Ordenado por"
             value={sortBy.replace(/_/g, " ")}

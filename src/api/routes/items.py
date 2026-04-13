@@ -15,6 +15,9 @@ from ..schemas import (
     CityComparison,
     ItemDetailResponse,
     ItemsResponse,
+    LookupItemSchema,
+    LookupMaterial,
+    LookupResponse,
     MaterialCost,
     ScoredItemSchema,
 )
@@ -206,6 +209,115 @@ def list_items(
             "sort_by": sort_by,
         },
     )
+
+
+@router.get("/lookup", response_model=LookupResponse)
+def lookup_items(
+    request: Request,
+    ids: str | None = Query(None, description="Comma-separated product IDs"),
+    q: str | None = Query(None, description="Name search (case-insensitive)"),
+    city: str = Query("Lymhurst"),
+    market: str = Query("marketplace"),
+    use_focus: bool = Query(False),
+) -> LookupResponse:
+    """Return items with available price data. Includes items with missing prices (marked has_complete_data=False).
+    Used for tracked/favorited items view and full-text search."""
+    if not ids and not q:
+        return LookupResponse(items=[])
+
+    state = _get_state(request)
+
+    from ...item_names import format_item_id
+    from ...rrr_engine import get_effective_material_cost
+    from ...scoring import _get_unit_prices, _index_prices
+
+    price_idx = _index_prices(state.prices)
+
+    if ids:
+        requested_ids = {i.strip() for i in ids.split(",") if i.strip()}
+        recipes = [r for r in state.recipes if r.product_id in requested_ids]
+    else:
+        q_lower = (q or "").lower()
+        recipes = [
+            r for r in state.recipes
+            if q_lower in format_item_id(r.product_id).lower() or q_lower in r.product_id.lower()
+        ]
+
+    sell_location = "Black Market" if market == "black_market" else city
+
+    items: list[LookupItemSchema] = []
+    seen: set[str] = set()
+
+    for recipe in recipes:
+        pid = recipe.product_id
+        if pid in seen:
+            continue
+        seen.add(pid)
+
+        display_name = format_item_id(pid)
+        materials_out = [
+            LookupMaterial(
+                item_id=m.item_id,
+                quantity=m.quantity,
+                is_artifact_component=m.is_artifact_component,
+            )
+            for m in recipe.materials
+        ]
+
+        material_cost: float | None = None
+        sell_price: float | None = None
+        profit_absolute: float | None = None
+        return_rate_pct: float | None = None
+        has_complete_data = False
+
+        unit_prices = _get_unit_prices(recipe.materials, price_idx, city)
+        if unit_prices:
+            try:
+                effective_cost = get_effective_material_cost(
+                    recipe.materials,
+                    unit_prices,
+                    category=recipe.category,
+                    city=city,
+                    city_bonuses=state.city_bonuses,
+                    use_focus=use_focus,
+                    spec_bonus=0.0,
+                )
+                material_cost = sum(unit_prices.get(m.item_id, 0.0) * m.quantity for m in recipe.materials)
+
+                mp_sell = price_idx.get((pid, sell_location))
+                sp = mp_sell.sell_price_min if mp_sell else None
+                if sp and sp > 0:
+                    tax_rate = (
+                        state.config.premium_tax_rate
+                        if state.config.is_premium
+                        else state.config.normal_tax_rate
+                    )
+                    net_rev = sp * (1.0 - tax_rate - state.config.setup_fee_rate)
+                    profit_absolute = net_rev - effective_cost
+                    return_rate_pct = (profit_absolute / effective_cost * 100.0) if effective_cost > 0 else 0.0
+                    sell_price = sp
+                    has_complete_data = True
+            except Exception:
+                pass
+
+        items.append(
+            LookupItemSchema(
+                product_id=pid,
+                display_name=display_name,
+                category=recipe.category,
+                tier=recipe.tier,
+                enchantment=recipe.enchantment,
+                silver_cost=recipe.silver_cost,
+                materials=materials_out,
+                material_cost=material_cost,
+                sell_price=sell_price,
+                profit_absolute=profit_absolute,
+                return_rate_pct=return_rate_pct,
+                has_complete_data=has_complete_data,
+            )
+        )
+
+    return LookupResponse(items=items)
 
 
 @router.get("/{item_id}", response_model=ItemDetailResponse)

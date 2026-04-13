@@ -118,3 +118,28 @@ export interface ItemsQueryParams {
   use_focus?: boolean;
   name_search?: string;
 }
+
+export interface LookupMaterial {
+  item_id: string;
+  quantity: number;
+  is_artifact_component: boolean;
+}
+
+export interface LookupItem {
+  product_id: string;
+  display_name: string;
+  category: string;
+  tier: number;
+  enchantment: number;
+  silver_cost: number;
+  materials: LookupMaterial[];
+  material_cost: number | null;
+  sell_price: number | null;
+  profit_absolute: number | null;
+  return_rate_pct: number | null;
+  has_complete_data: boolean;
+}
+
+export interface LookupResponse {
+  items: LookupItem[];
+}

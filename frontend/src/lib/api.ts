@@ -4,6 +4,7 @@ import type {
   CitiesResponse,
   ConfigResponse,
   ItemsQueryParams,
+  LookupResponse,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -96,6 +97,22 @@ export async function refreshPrices(): Promise<{ status: string; prices_count: n
 
 export function fetchConfig(): Promise<ConfigResponse> {
   return request<ConfigResponse>("/config");
+}
+
+export function lookupItems(params: {
+  ids?: string;
+  q?: string;
+  city?: string;
+  market?: string;
+  use_focus?: boolean;
+}): Promise<LookupResponse> {
+  const query: Record<string, string> = {};
+  if (params.ids) query.ids = params.ids;
+  if (params.q) query.q = params.q;
+  if (params.city) query.city = params.city;
+  if (params.market) query.market = params.market;
+  if (params.use_focus) query.use_focus = String(params.use_focus);
+  return request<LookupResponse>("/items/lookup", query);
 }
 
 export { ApiError };

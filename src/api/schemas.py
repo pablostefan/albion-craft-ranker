@@ -89,3 +89,28 @@ class ConfigResponse(BaseModel):
     freshness_weight: float
     min_profit: float
     sales_tax_rate: float
+
+
+class LookupMaterial(BaseModel):
+    item_id: str
+    quantity: int
+    is_artifact_component: bool
+
+
+class LookupItemSchema(BaseModel):
+    product_id: str
+    display_name: str
+    category: str
+    tier: int
+    enchantment: int
+    silver_cost: int
+    materials: list[LookupMaterial]
+    material_cost: float | None = None
+    sell_price: float | None = None
+    profit_absolute: float | None = None
+    return_rate_pct: float | None = None
+    has_complete_data: bool = False
+
+
+class LookupResponse(BaseModel):
+    items: list[LookupItemSchema]
