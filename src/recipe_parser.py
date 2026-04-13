@@ -84,12 +84,14 @@ def _parse_recipe_definition(
     product_id = str(item.get("@uniquename", "")).strip()
     if not product_id:
         return None
+    if _is_uncraftable_item(product_id):
+        return None
     if enchantment > 0:
         product_id = f"{product_id}@{enchantment}"
 
     return Recipe(
         product_id=product_id,
-        category=str(item.get("@craftingcategory") or "").strip(),
+        category=str(item.get("@craftingcategory") or item.get("@shopsubcategory1") or "").strip(),
         tier=_as_int(item.get("@tier")),
         enchantment=enchantment,
         materials=materials,
@@ -97,6 +99,27 @@ def _parse_recipe_definition(
         is_artifact=any(material.is_artifact_component for material in materials),
         amount_crafted=max(1, _as_int(recipe_data.get("@amountcrafted"), default=1)),
     )
+
+
+_UNCRAFTABLE_PREFIXES = (
+    "UNIQUE_UNLOCK_SKIN_",
+    "UNIQUE_UNLOCK_UNIQUE_VANITY",
+    "UNIQUE_CONSUMABLE_EVENT_",
+    "PLAYERISLAND_",
+    "JOURNAL_",
+    "QUESTITEM_",
+)
+
+_UNCRAFTABLE_SUBSTRINGS = (
+    "_NONTRADABLE",
+    "VANITY_CONSUMABLE",
+)
+
+
+def _is_uncraftable_item(product_id: str) -> bool:
+    if product_id.startswith(_UNCRAFTABLE_PREFIXES):
+        return True
+    return any(sub in product_id for sub in _UNCRAFTABLE_SUBSTRINGS)
 
 
 def _select_primary_recipe(requirements: Any) -> dict[str, Any] | None:

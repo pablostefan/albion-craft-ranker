@@ -15,12 +15,28 @@ const CATEGORIES = [
   "cape",
   "consumable",
   "gathering",
+  "material",
   "melee",
   "mount",
   "offhand",
   "ranged",
   "tool",
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  accessories: "Acessórios",
+  armor: "Armadura",
+  artifact: "Artefato",
+  cape: "Capa",
+  consumable: "Consumível",
+  gathering: "Coleta",
+  material: "Material",
+  melee: "Corpo a Corpo",
+  mount: "Montaria",
+  offhand: "Off-hand",
+  ranged: "À Distância",
+  tool: "Ferramenta",
+};
 
 const TIERS = [4, 5, 6, 7, 8] as const;
 const ENCHANTMENTS = [0, 1, 2, 3] as const;
@@ -66,6 +82,7 @@ export interface FilterValues {
   w_focus: string;
   w_liquidity: string;
   w_freshness: string;
+  excludeCaerleon: string;
 }
 
 /* ── Active Chip ── */
@@ -92,7 +109,7 @@ export function ActiveFilterChips({
       value: filters.market === "black_market" ? "Mercado Negro" : "Comparação",
     });
   }
-  if (filters.category) chips.push({ key: "category", label: "Categoria", value: filters.category });
+  if (filters.category) chips.push({ key: "category", label: "Categoria", value: CATEGORY_LABELS[filters.category] ?? filters.category });
   if (filters.tier) chips.push({ key: "tier", label: "Tier", value: `T${filters.tier}` });
   if (filters.enchantment) chips.push({ key: "enchantment", label: "Enc", value: `@${filters.enchantment}` });
   if (filters.city) chips.push({ key: "city", label: "Cidade", value: filters.city });
@@ -101,6 +118,7 @@ export function ActiveFilterChips({
     chips.push({ key: "quality", label: "Qualidade", value: q?.label ?? filters.quality });
   }
   if (filters.minProfit) chips.push({ key: "min_profit", label: "Lucro Mín.", value: `${filters.minProfit}s` });
+  if (filters.excludeCaerleon !== "true") chips.push({ key: "exclude_caerleon", label: "Caerleon", value: "Incluído" });
 
   if (chips.length === 0) return null;
 
@@ -364,6 +382,41 @@ export default function FilterSidebar({
 
   const filterControls = (
     <div className="space-y-5">
+      {/* Exclude Caerleon toggle */}
+      <label
+        className="flex cursor-pointer items-center gap-3"
+        htmlFor="toggle-exclude-caerleon"
+      >
+        <div className="relative">
+          <input
+            id="toggle-exclude-caerleon"
+            type="checkbox"
+            checked={filters.excludeCaerleon === "true"}
+            onChange={(e) =>
+              onFilterChange("exclude_caerleon", e.target.checked ? "true" : "false")
+            }
+            className="peer sr-only"
+          />
+          <div
+            className="h-6 w-11 rounded-full transition-colors peer-checked:bg-[var(--color-accent-gold)] peer-focus-visible:ring-2"
+            style={{
+              background: filters.excludeCaerleon === "true" ? "var(--color-accent-gold)" : "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+            }}
+          />
+          <div
+            className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full transition-transform peer-checked:translate-x-5"
+            style={{ background: "var(--color-bg-canvas)" }}
+          />
+        </div>
+        <span
+          className="text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Excluir Caerleon
+        </span>
+      </label>
+
       {/* Market Mode */}
       <div>
         <span
@@ -387,7 +440,7 @@ export default function FilterSidebar({
         label="Categoria"
         value={filters.category}
         onChange={(v) => onFilterChange("category", v)}
-        options={CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
+        options={CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] ?? c }))}
         placeholder="Todas Categorias"
       />
 

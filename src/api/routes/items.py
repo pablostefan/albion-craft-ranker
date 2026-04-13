@@ -29,13 +29,13 @@ def _get_state(request: Request) -> AppState:
 
 
 def _scored_items(
-    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None,
+    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None, exclude_cities: frozenset[str] = frozenset(),
 ) -> list[ScoredItem]:
     use_cache = config_override is None
     cfg = config_override if config_override is not None else state.config
 
     if use_cache:
-        cache_key = (city, market, sort_by, sell_city)
+        cache_key = (city, market, sort_by, sell_city, exclude_cities)
         cached = state.cache.get(cache_key)
         if cached is not None:
             return cached
@@ -48,6 +48,7 @@ def _scored_items(
         craft_city=city,
         sell_mode=market,
         sell_city=sell_city,
+        exclude_cities=exclude_cities,
     )
 
     # Sort
@@ -74,6 +75,7 @@ def list_items(
     quality: int | None = Query(None),
     market: str = Query("marketplace"),
     sell_city: str | None = Query(None, description="City where items are sold (for cross-city arbitrage)"),
+    exclude_cities: str | None = Query(None, description="Comma-separated cities to exclude from best-city calculation"),
     sort_by: str = Query("return_rate_pct"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=500),
@@ -85,6 +87,8 @@ def list_items(
     w_freshness: float | None = Query(None, ge=0, le=1),
 ) -> ItemsResponse:
     state = _get_state(request)
+
+    excluded = frozenset(c.strip() for c in exclude_cities.split(",") if c.strip()) if exclude_cities else frozenset()
 
     # Per-request scoring config override when custom weights are provided
     custom_weights = [w_profit, w_focus, w_liquidity, w_freshness]
@@ -104,7 +108,7 @@ def list_items(
     if sort_by not in VALID_SORT_FIELDS:
         raise HTTPException(400, f"Invalid sort_by: {sort_by}")
 
-    items = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override)
+    items = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override, exclude_cities=excluded)
 
     # Apply filters
     filtered = items
@@ -153,14 +157,17 @@ def get_item(
     city: str = Query("Lymhurst"),
     market: str = Query("marketplace"),
     sell_city: str | None = Query(None),
+    exclude_cities: str | None = Query(None, description="Comma-separated cities to exclude"),
 ) -> ItemDetailResponse:
     state = _get_state(request)
 
     if market not in VALID_MARKETS:
         raise HTTPException(400, f"Invalid market: {market}")
 
+    excluded = frozenset(c.strip() for c in exclude_cities.split(",") if c.strip()) if exclude_cities else frozenset()
+
     # Score all items for the requested city/market
-    items = _scored_items(state, city, market, "return_rate_pct", sell_city=sell_city)
+    items = _scored_items(state, city, market, "return_rate_pct", sell_city=sell_city, exclude_cities=excluded)
     target = next((i for i in items if i.product_id == item_id), None)
     if target is None:
         raise HTTPException(404, f"Item not found: {item_id}")
@@ -188,6 +195,8 @@ def get_item(
     # City comparison
     city_comparison: list[CityComparison] = []
     for comp_city in PRD_CITY_LOCATIONS:
+        if comp_city in excluded:
+            continue
         city_items = rank_items_v2(
             [recipe] if recipe else [],
             state.prices,
@@ -196,6 +205,7 @@ def get_item(
             craft_city=comp_city,
             sell_mode=market,
             sell_city=sell_city,
+            exclude_cities=excluded,
         )
         match = next((i for i in city_items if i.product_id == item_id), None)
         city_comparison.append(
@@ -239,9 +249,49 @@ def _item_dict(item: ScoredItem) -> dict:
     }
 
 
+_CATEGORY_MAP: dict[str, set[str]] = {
+    "accessories": {"bag"},
+    "armor": {
+        "cloth_armor", "cloth_helmet", "cloth_shoes",
+        "leather_armor", "leather_helmet", "leather_shoes",
+        "plate_armor", "plate_helmet", "plate_shoes",
+        "armors", "head", "shoes",
+    },
+    "cape": {"cape", "capes", "other"},
+    "consumable": {
+        "food", "potion", "fish",
+        "meat_chicken", "meat_cow", "meat_goat", "meat_goose", "meat_pig", "meat_sheep",
+    },
+    "gathering": {"gatherergear"},
+    "melee": {"sword", "axe", "dagger", "hammer", "mace", "spear", "quarterstaff", "knuckles"},
+    "offhand": {"offhand", "offhands", "shieldtype"},
+    "ranged": {
+        "bow", "crossbow",
+        "arcanestaff", "cursestaff", "firestaff", "froststaff",
+        "holystaff", "naturestaff", "shapeshifterstaff",
+    },
+    "tool": {"tools"},
+    "material": {"fiber", "hide", "ore", "rock", "wood", "resources"},
+}
+
+
 def _matches_category(item: ScoredItem, category: str, state: AppState) -> bool:
     recipe = state.get_recipe(item.product_id)
-    return recipe is not None and recipe.category == category
+    if recipe is None:
+        return False
+    if category == "artifact":
+        return recipe.is_artifact or "_ARTEFACT_" in (item.product_id or "")
+    if category == "mount":
+        return "MOUNT" in (item.product_id or "")
+    allowed = _CATEGORY_MAP.get(category)
+    if allowed is None:
+        return False
+    cat = recipe.category
+    if cat in allowed:
+        return True
+    if category == "cape" and cat.startswith("accessoires_capes_"):
+        return True
+    return False
 
 
 def _matches_tier(item: ScoredItem, tier: int, state: AppState) -> bool:

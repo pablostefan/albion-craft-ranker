@@ -104,4 +104,5 @@ export interface ItemsQueryParams {
   w_focus?: number;
   w_liquidity?: number;
   w_freshness?: number;
+  exclude_cities?: string;
 }

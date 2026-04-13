@@ -24,6 +24,7 @@ export default function ItemDetailPage() {
   const city = searchParams.get("city") ?? undefined;
   const market = searchParams.get("market") ?? undefined;
   const sellCity = searchParams.get("sell_city") ?? undefined;
+  const excludeCities = searchParams.get("exclude_caerleon") !== "false" ? "Caerleon" : undefined;
 
   const [data, setData] = useState<ItemDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,22 +32,22 @@ export default function ItemDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchItemDetail(productId, { city, market, sell_city: sellCity })
+    fetchItemDetail(productId, { city, market, sell_city: sellCity, exclude_cities: excludeCities })
       .then((res) => { if (!cancelled) { setData(res); setError(null); } })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [productId, city, market, sellCity]);
+  }, [productId, city, market, sellCity, excludeCities]);
 
   // loadData kept only for retry button
   const loadData = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetchItemDetail(productId, { city, market, sell_city: sellCity })
+    fetchItemDetail(productId, { city, market, sell_city: sellCity, exclude_cities: excludeCities })
       .then(setData)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [productId, city, market, sellCity]);
+  }, [productId, city, market, sellCity, excludeCities]);
 
   const backHref = `/?${searchParams.toString()}`;
   const itemName = extractItemName(productId);

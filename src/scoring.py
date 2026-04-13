@@ -295,6 +295,7 @@ def _find_best_city(
     price_idx: Dict[Tuple[str, str], MarketPrice],
     city_bonuses: Dict[str, Dict[str, float]] | None,
     staleness_cap_hours: float,
+    exclude_cities: frozenset[str] = frozenset(),
 ) -> str:
     """Retorna a cidade onde return_rate_pct e maximo para a receita.
 
@@ -302,10 +303,13 @@ def _find_best_city(
     Para sell_mode='comparison', usa marketplace como base de comparacao.
     """
     effective_sell_mode = "marketplace" if sell_mode == "comparison" else sell_mode
-    best_city = SUPPORTED_CITIES[0]
+    available = [c for c in SUPPORTED_CITIES if c not in exclude_cities]
+    best_city = available[0] if available else SUPPORTED_CITIES[0]
     best_rr = -math.inf
 
     for city in SUPPORTED_CITIES:
+        if city in exclude_cities:
+            continue
         unit_prices = _get_unit_prices(recipe.materials, price_idx, city)
         if unit_prices is None:
             continue
@@ -362,6 +366,7 @@ def rank_items_v2(
     spec_bonus: float = 0.0,
     quality: int = 1,
     staleness_cap_hours: float = 48.0,
+    exclude_cities: frozenset[str] = frozenset(),
 ) -> List[ScoredItem]:
     """Motor de ranqueamento v2.
 
@@ -530,6 +535,7 @@ def rank_items_v2(
             price_idx=price_idx,
             city_bonuses=city_bonuses,
             staleness_cap_hours=staleness_cap_hours,
+            exclude_cities=exclude_cities,
         )
 
         scored.append(

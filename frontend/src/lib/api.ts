@@ -58,17 +58,19 @@ export function fetchItems(params: ItemsQueryParams = {}): Promise<ItemsResponse
   if (params.w_focus !== undefined) query.w_focus = String(params.w_focus);
   if (params.w_liquidity !== undefined) query.w_liquidity = String(params.w_liquidity);
   if (params.w_freshness !== undefined) query.w_freshness = String(params.w_freshness);
+  if (params.exclude_cities) query.exclude_cities = params.exclude_cities;
   return request<ItemsResponse>("/items", query);
 }
 
 export function fetchItemDetail(
   productId: string,
-  params?: { city?: string; market?: string; sell_city?: string },
+  params?: { city?: string; market?: string; sell_city?: string; exclude_cities?: string },
 ): Promise<ItemDetailResponse> {
   const query: Record<string, string> = {};
   if (params?.city) query.city = params.city;
   if (params?.market) query.market = params.market;
   if (params?.sell_city) query.sell_city = params.sell_city;
+  if (params?.exclude_cities) query.exclude_cities = params.exclude_cities;
   return request<ItemDetailResponse>(`/items/${encodeURIComponent(productId)}`, query);
 }
 
