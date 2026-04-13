@@ -31,7 +31,7 @@ class RankedItem:
     margin_pct: float
     focus_cost: float
     profit_per_focus: float
-    liquidity_score: float
+    volume_score: float
     final_score: float
 
 
@@ -68,7 +68,7 @@ def _index_prices(prices: Iterable[MarketPrice]) -> Dict[Tuple[str, str], Market
     return out
 
 
-def _extract_liquidity_value(history_rows: List[dict]) -> float:
+def _extract_daily_volume(history_rows: List[dict]) -> float:
     points: List[float] = []
     for row in history_rows:
         # O endpoint pode retornar formatos diferentes; tentamos os campos mais comuns.
@@ -112,9 +112,9 @@ def rank_items(
     quality: int,
     return_rate: float,
     tax_rate: float,
-    liquidity_days: int,
+    volume_days: int,
     profit_weight: float,
-    liquidity_weight: float,
+    volume_weight: float,
     min_profit: float,
     use_history: bool = False,
 ) -> List[RankedItem]:
@@ -128,12 +128,12 @@ def rank_items(
 
     price_idx = _index_prices(prices_all)
 
-    liquidity_by_product: Dict[str, float] = {}
+    volume_by_product: Dict[str, float] = {}
     if use_history:
         for batch in _chunk(products, 40):
-            history_by_item = client.get_history_bulk(batch, sell_city, quality, days=liquidity_days)
+            history_by_item = client.get_history_bulk(batch, sell_city, quality, days=volume_days)
             for product in batch:
-                liquidity_by_product[product] = _extract_liquidity_value(history_by_item.get(product, []))
+                volume_by_product[product] = _extract_daily_volume(history_by_item.get(product, []))
 
     grouped: Dict[str, List[RecipeLine]] = {}
     for line in recipe_lines:
@@ -176,9 +176,9 @@ def rank_items(
         focus_cost = max(line.focus_cost for line in lines)
         profit_per_focus = (profit / focus_cost) if focus_cost > 0 else 0.0
 
-        liquidity_value = liquidity_by_product.get(product_id, 0.0)
+        volume_value = volume_by_product.get(product_id, 0.0)
         if not use_history:
-            liquidity_value = max(product_price.buy_price_max, 0.0)
+            volume_value = max(product_price.buy_price_max, 0.0)
 
         ranked.append(
             RankedItem(
@@ -191,18 +191,18 @@ def rank_items(
                 margin_pct=margin_pct,
                 focus_cost=focus_cost,
                 profit_per_focus=profit_per_focus,
-                liquidity_score=liquidity_value,
+                volume_score=volume_value,
                 final_score=0.0,
             )
         )
 
     profit_norm = _normalize([r.profit for r in ranked])
-    liq_norm = _normalize([r.liquidity_score for r in ranked])
+    vol_norm = _normalize([r.volume_score for r in ranked])
 
     for i, item in enumerate(ranked):
-        item.final_score = profit_weight * profit_norm[i] + liquidity_weight * liq_norm[i]
+        item.final_score = profit_weight * profit_norm[i] + volume_weight * vol_norm[i]
 
-    ranked.sort(key=lambda x: (x.final_score, x.profit, x.liquidity_score), reverse=True)
+    ranked.sort(key=lambda x: (x.final_score, x.profit, x.volume_score), reverse=True)
     return ranked
 
 
@@ -221,7 +221,7 @@ def save_ranking_csv(items: List[RankedItem], path: Path) -> None:
                 "margin_pct",
                 "focus_cost",
                 "profit_per_focus",
-                "liquidity_score",
+                "volume_score",
                 "final_score",
             ]
         )
@@ -237,7 +237,7 @@ def save_ranking_csv(items: List[RankedItem], path: Path) -> None:
                     round(i.margin_pct, 2),
                     round(i.focus_cost, 2),
                     round(i.profit_per_focus, 4),
-                    round(i.liquidity_score, 2),
+                    round(i.volume_score, 2),
                     round(i.final_score, 4),
                 ]
             )
@@ -284,6 +284,33 @@ def _raw_material_cost(
 ) -> float:
     """Custo bruto total dos materiais (sem aplicar RRR)."""
     return sum(m.quantity * unit_prices[m.item_id] for m in materials)
+
+
+def find_cheapest_city_per_material(
+    materials: List[Material],
+    price_idx: Dict[Tuple[str, str], MarketPrice],
+    cities: tuple[str, ...] = SUPPORTED_CITIES,
+) -> Dict[str, Tuple[str, float]]:
+    """For each material, find the city with the lowest price.
+
+    Uses same price logic as _get_unit_prices: sell_price_min, fallback buy_price_max.
+    Returns {material_item_id: (cheapest_city, cheapest_price)}.
+    """
+    result: Dict[str, Tuple[str, float]] = {}
+    for m in materials:
+        best_city: str | None = None
+        best_price = float("inf")
+        for city in cities:
+            mp = price_idx.get((m.item_id, city))
+            if mp is None:
+                continue
+            price = mp.sell_price_min if mp.sell_price_min > 0 else mp.buy_price_max
+            if 0 < price < best_price:
+                best_price = price
+                best_city = city
+        if best_city is not None:
+            result[m.item_id] = (best_city, best_price)
+    return result
 
 
 def _find_best_city(
@@ -444,7 +471,7 @@ def rank_items_v2(
         sales_tax: float = 0.0
         net_revenue: float = 0.0
         freshness_hours: float = 0.0
-        liquidity: float = 0.0
+        volume: float = 0.0
 
         mp_sell = price_idx.get((recipe.product_id, _sell_city))
         mp_bm = price_idx.get((recipe.product_id, _BM_LOCATION))
@@ -460,7 +487,7 @@ def rank_items_v2(
                 sales_tax = total_sell * config.sales_tax_rate
                 net_revenue = total_sell - sales_tax
                 freshness_hours = mp_sell.staleness_hours
-                liquidity = max(mp_sell.buy_price_max, 0.0)
+                volume = max(mp_sell.buy_price_max, 0.0)
 
         if sell_mode == "black_market":
             if mp_bm is None or mp_bm.buy_price_max <= 0:
@@ -470,7 +497,7 @@ def rank_items_v2(
             sales_tax = total_sell * config.sales_tax_rate
             net_revenue = total_sell - sales_tax
             freshness_hours = mp_bm.staleness_hours
-            liquidity = sell_price
+            volume = sell_price
 
         # For comparison mode, skip entirely if neither source has revenue
         if sell_mode == "comparison" and net_revenue <= 0:
@@ -554,7 +581,8 @@ def rank_items_v2(
                 focus_cost=recipe.focus_cost,
                 profit_per_focus=profit_per_focus,
                 freshness_score=freshness_score,
-                liquidity_score=liquidity,
+                volume_score=volume,
+                volume_norm=0.0,  # filled after normalization
                 best_city=best_city,
                 final_score=0.0,  # filled after normalization
                 bm_sell_price=bm_sell_price,
@@ -570,16 +598,21 @@ def rank_items_v2(
     # ── 8. Normalize components and compute final_score ───────────────────
     rr_norm = _normalize([s.return_rate_pct for s in scored])
     pf_norm = _normalize([s.profit_per_focus for s in scored])
-    liq_norm = _normalize([s.liquidity_score for s in scored])
+    vol_norm = _normalize([s.volume_score for s in scored])
     # freshness_score is already in [0, 1]; no normalization needed
 
     for i, item in enumerate(scored):
-        item.final_score = (
+        item.volume_norm = vol_norm[i]
+        additive_score = (
             config.profit_weight * rr_norm[i]
             + config.focus_weight * pf_norm[i]
-            + config.liquidity_weight * liq_norm[i]
+            + config.volume_weight * vol_norm[i]
             + config.freshness_weight * item.freshness_score
         )
+        # Multiplicative volume gate: low-volume items are severely
+        # penalised regardless of profit. Floor of 0.10 avoids total zeroing.
+        vol_gate = 0.10 + 0.90 * vol_norm[i]
+        item.final_score = additive_score * vol_gate
 
     scored.sort(
         key=lambda x: (x.final_score, x.return_rate_pct, x.profit_absolute),

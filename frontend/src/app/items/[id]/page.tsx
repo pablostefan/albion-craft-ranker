@@ -105,7 +105,7 @@ export default function ItemDetailPage() {
     );
   }
 
-  const { item, cost_breakdown, city_comparison } = data;
+  const { item, cost_breakdown, city_comparison, optimized_material_cost, optimized_profit, daily_volume } = data;
   const isPositive = item.return_rate_pct > 0.5;
   const isNegative = item.return_rate_pct < -0.5;
 
@@ -227,6 +227,117 @@ export default function ItemDetailPage() {
         </div>
       </section>
 
+      {/* ── B2) Volume de Vendas ── */}
+      {(() => {
+        const volColor = item.volume_norm >= 0.7
+          ? "var(--color-profit-strong)"
+          : item.volume_norm >= 0.4
+            ? "var(--color-accent-gold)"
+            : "var(--color-loss-strong)";
+        const volBgColor = item.volume_norm >= 0.7
+          ? "var(--color-profit-soft)"
+          : item.volume_norm >= 0.4
+            ? "var(--color-info-soft)"
+            : "var(--color-loss-soft)";
+        const volLabel = item.volume_norm >= 0.7 ? "Alta" : item.volume_norm >= 0.4 ? "Média" : "Baixa";
+        const volPct = (item.volume_norm * 100).toFixed(0);
+
+        return (
+          <section
+            className="rounded-lg border p-6"
+            style={{
+              background: "var(--color-bg-elevated)",
+              borderColor: "var(--color-border-default)",
+            }}
+          >
+            {/* Header row */}
+            <div className="mb-4 flex items-center justify-between">
+              <h2
+                className="text-sm font-bold uppercase tracking-wider"
+                style={{
+                  fontFamily: "var(--font-cinzel), Cinzel, serif",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Volume de Vendas
+              </h2>
+              <span
+                className="rounded px-2 py-0.5 text-xs font-bold"
+                style={{ background: volBgColor, color: volColor }}
+              >
+                {volLabel}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-1 h-2 w-full overflow-hidden rounded-full" style={{ background: "var(--color-bg-overlay)" }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${volPct}%`, background: volColor }}
+              />
+            </div>
+            <p className="mb-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {volPct}% do ranking
+            </p>
+
+            {/* Key metrics grid */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div
+                className="rounded-lg border p-4"
+                style={{
+                  background: "var(--color-bg-overlay)",
+                  borderColor: "var(--color-border-default)",
+                }}
+              >
+                <p className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
+                  Volume Diário
+                </p>
+                <p
+                  className="mt-1 tabular-nums text-lg font-extrabold"
+                  style={{
+                    fontFamily: "var(--font-plex-mono), monospace",
+                    color: daily_volume != null && daily_volume > 0 ? volColor : "var(--color-text-muted)",
+                  }}
+                >
+                  {daily_volume != null ? Math.round(daily_volume).toLocaleString("pt-BR") : "—"}
+                </p>
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  Mediana de itens vendidos/dia (7d)
+                </p>
+              </div>
+              <div
+                className="rounded-lg border p-4"
+                style={{
+                  background: "var(--color-bg-overlay)",
+                  borderColor: "var(--color-border-default)",
+                }}
+              >
+                <p className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
+                  Peso no Ranking
+                </p>
+                <p
+                  className="mt-1 tabular-nums text-lg font-extrabold"
+                  style={{
+                    fontFamily: "var(--font-plex-mono), monospace",
+                    color: "var(--color-info)",
+                  }}
+                >
+                  55%
+                </p>
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  Contribuição do volume no score final
+                </p>
+              </div>
+            </div>
+
+            {/* Explanation */}
+            <p className="mt-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              O volume diário indica a mediana de itens efetivamente vendidos por dia nos últimos 7 dias.
+            </p>
+          </section>
+        );
+      })()}
+
       {/* ── C) Cost Breakdown ── */}
       <section>
         <h2
@@ -238,7 +349,7 @@ export default function ItemDetailPage() {
         >
           Detalhamento de Custo
         </h2>
-        <CostBreakdown materials={cost_breakdown} item={item} />
+        <CostBreakdown materials={cost_breakdown} item={item} optimizedMaterialCost={optimized_material_cost} optimizedProfit={optimized_profit} />
       </section>
 
       {/* ── D) City Comparison ── */}

@@ -15,13 +15,15 @@ export interface ScoredItem {
   focus_cost: number;
   profit_per_focus: number;
   freshness_score: number;
-  liquidity_score: number;
+  volume_score: number;
+  volume_norm: number;
   best_city: string;
   final_score: number;
   bm_sell_price: number | null;
   bm_net_revenue: number | null;
   bm_profit: number | null;
   bm_return_rate_pct: number | null;
+  daily_volume: number | null;
 }
 
 export interface ItemsResponse {
@@ -36,6 +38,8 @@ export interface MaterialCost {
   unit_price: number;
   total_price: number;
   is_artifact_component: boolean;
+  best_buy_city: string | null;
+  best_buy_price: number | null;
 }
 
 export interface CityComparison {
@@ -49,6 +53,9 @@ export interface ItemDetailResponse {
   item: ScoredItem;
   cost_breakdown: MaterialCost[];
   city_comparison: CityComparison[];
+  optimized_material_cost: number | null;
+  optimized_profit: number | null;
+  daily_volume: number | null;
 }
 
 export interface CityBonusSchema {
@@ -72,7 +79,7 @@ export interface ConfigResponse {
   is_premium: boolean;
   profit_weight: number;
   focus_weight: number;
-  liquidity_weight: number;
+  volume_weight: number;
   freshness_weight: number;
   min_profit: number;
   sales_tax_rate: number;
@@ -83,7 +90,7 @@ export type SortField =
   | "return_rate_pct"
   | "profit"
   | "profit_per_focus"
-  | "liquidity";
+  | "daily_volume";
 
 export type SortOrder = "asc" | "desc";
 
@@ -104,7 +111,7 @@ export interface ItemsQueryParams {
   sell_city?: string;
   w_profit?: number;
   w_focus?: number;
-  w_liquidity?: number;
+  w_volume?: number;
   w_freshness?: number;
   exclude_cities?: string;
   use_focus?: boolean;

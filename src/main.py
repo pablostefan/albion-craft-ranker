@@ -21,7 +21,7 @@ from .scoring import (
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Rankeia melhores itens para craftar no Albion (lucro + liquidez)."
+        description="Rankeia melhores itens para craftar no Albion (lucro + volume)."
     )
 
     # ── Source selection ───────────────────────────────────────────────────
@@ -73,10 +73,10 @@ def build_parser() -> argparse.ArgumentParser:
     # ── Legacy parameters (backward compat) ───────────────────────────────
     p.add_argument("--return-rate", type=float, default=0.152)
     p.add_argument("--tax-rate", type=float, default=0.065)
-    p.add_argument("--liquidity-days", type=int, default=7)
-    p.add_argument("--use-history", action="store_true", help="Usa endpoint de historico para liquidez.")
+    p.add_argument("--volume-days", type=int, default=7)
+    p.add_argument("--use-history", action="store_true", help="Usa endpoint de historico para volume diario.")
     p.add_argument("--profit-weight", type=float, default=0.7)
-    p.add_argument("--liquidity-weight", type=float, default=0.3)
+    p.add_argument("--volume-weight", type=float, default=0.3)
     p.add_argument("--min-profit", type=float, default=0.0)
 
     # ── Output ────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ _V2_CSV_COLUMNS = [
     "focus_cost",
     "profit_per_focus",
     "freshness_score",
-    "liquidity_score",
+    "volume_score",
     "best_city",
     "final_score",
 ]
@@ -132,7 +132,7 @@ def save_ranking_csv_v2(items: List[ScoredItem], path: Path) -> None:
                 item.focus_cost,
                 round(item.profit_per_focus, 4),
                 round(item.freshness_score, 4),
-                round(item.liquidity_score, 2),
+                round(item.volume_score, 2),
                 item.best_city,
                 round(item.final_score, 4),
             ])
@@ -156,12 +156,12 @@ def print_table_v2(items: List[ScoredItem], top: int) -> None:
 def print_table_legacy(items: List[RankedItem], top: int) -> None:
     print("\nTOP ITENS PARA CRAFT (lucro + saida)")
     print(
-        "pos\titem\tfinal_score\tprofit\tmargin%\tliq\tprofit/focus"
+        "pos\titem\tfinal_score\tprofit\tmargin%\tvol\tprofit/focus"
     )
     for i, it in enumerate(items[:top], start=1):
         print(
             f"{i}\t{it.product_id}\t{it.final_score:.4f}\t{it.profit:.0f}\t"
-            f"{it.margin_pct:.1f}%\t{it.liquidity_score:.1f}\t{it.profit_per_focus:.2f}"
+            f"{it.margin_pct:.1f}%\t{it.volume_score:.1f}\t{it.profit_per_focus:.2f}"
         )
 
 
@@ -228,8 +228,8 @@ def _run_legacy(args: argparse.Namespace) -> None:
         print("Erro: --sell-city e obrigatorio no modo legado (--recipes).", file=sys.stderr)
         sys.exit(1)
 
-    if abs((args.profit_weight + args.liquidity_weight) - 1.0) > 1e-9:
-        raise ValueError("profit_weight + liquidity_weight precisa ser 1.0")
+    if abs((args.profit_weight + args.volume_weight) - 1.0) > 1e-9:
+        raise ValueError("profit_weight + volume_weight precisa ser 1.0")
 
     recipe_lines = load_recipes(Path(args.recipes))
     client = AlbionAPIClient(server=args.server)
@@ -242,9 +242,9 @@ def _run_legacy(args: argparse.Namespace) -> None:
             quality=args.quality,
             return_rate=args.return_rate,
             tax_rate=args.tax_rate,
-            liquidity_days=args.liquidity_days,
+            volume_days=args.volume_days,
             profit_weight=args.profit_weight,
-            liquidity_weight=args.liquidity_weight,
+            volume_weight=args.volume_weight,
             min_profit=args.min_profit,
             use_history=args.use_history,
         )

@@ -56,7 +56,7 @@ export function fetchItems(params: ItemsQueryParams = {}): Promise<ItemsResponse
   if (params.sell_city) query.sell_city = params.sell_city;
   if (params.w_profit !== undefined) query.w_profit = String(params.w_profit);
   if (params.w_focus !== undefined) query.w_focus = String(params.w_focus);
-  if (params.w_liquidity !== undefined) query.w_liquidity = String(params.w_liquidity);
+  if (params.w_volume !== undefined) query.w_volume = String(params.w_volume);
   if (params.w_freshness !== undefined) query.w_freshness = String(params.w_freshness);
   if (params.exclude_cities) query.exclude_cities = params.exclude_cities;
   if (params.use_focus) query.use_focus = String(params.use_focus);
@@ -78,6 +78,19 @@ export function fetchItemDetail(
 
 export function fetchCities(): Promise<CitiesResponse> {
   return request<CitiesResponse>("/cities");
+}
+
+export async function refreshPrices(): Promise<{ status: string; prices_count: number }> {
+  const url = new URL("/refresh", API_BASE);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ApiError(res.status, `API ${res.status}: ${body}`);
+  }
+  return res.json();
 }
 
 export function fetchConfig(): Promise<ConfigResponse> {

@@ -6,9 +6,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ...albion_client import PRD_CITY_LOCATIONS
+from ...albion_client import AlbionAPIClient, PRD_CITY_LOCATIONS
 from ...models import ScoredItem
-from ...scoring import rank_items_v2
+from ...scoring import _chunk, _extract_daily_volume, rank_items_v2
 from ..dependencies import AppState
 from ..schemas import (
     CityComparison,
@@ -20,7 +20,7 @@ from ..schemas import (
 
 router = APIRouter(prefix="/items", tags=["items"])
 
-VALID_SORT_FIELDS = {"final_score", "return_rate_pct", "profit", "profit_per_focus", "liquidity"}
+VALID_SORT_FIELDS = {"final_score", "return_rate_pct", "profit", "profit_per_focus", "daily_volume"}
 VALID_MARKETS = {"marketplace", "black_market", "comparison"}
 
 
@@ -59,8 +59,6 @@ def _scored_items(
         items.sort(key=lambda x: x.profit_absolute, reverse=True)
     elif sort_by == "profit_per_focus":
         items.sort(key=lambda x: x.profit_per_focus, reverse=True)
-    elif sort_by == "liquidity":
-        items.sort(key=lambda x: x.liquidity_score, reverse=True)
     # default: return_rate_pct → already sorted by final_score which correlates
 
     if use_cache:
@@ -79,14 +77,14 @@ def list_items(
     market: str = Query("marketplace"),
     sell_city: str | None = Query(None, description="City where items are sold (for cross-city arbitrage)"),
     exclude_cities: str | None = Query(None, description="Comma-separated cities to exclude from best-city calculation"),
-    sort_by: str = Query("liquidity"),
+    sort_by: str = Query("daily_volume"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     min_profit: float | None = Query(None),
     w_profit: float | None = Query(None, ge=0, le=1),
     w_focus: float | None = Query(None, ge=0, le=1),
-    w_liquidity: float | None = Query(None, ge=0, le=1),
+    w_volume: float | None = Query(None, ge=0, le=1),
     w_freshness: float | None = Query(None, ge=0, le=1),
     use_focus: bool = Query(False, description="Whether to include focus cost in profit calculations"),
 ) -> ItemsResponse:
@@ -95,13 +93,13 @@ def list_items(
     excluded = frozenset(c.strip() for c in exclude_cities.split(",") if c.strip()) if exclude_cities else frozenset()
 
     # Per-request scoring config override when custom weights are provided
-    custom_weights = [w_profit, w_focus, w_liquidity, w_freshness]
+    custom_weights = [w_profit, w_focus, w_volume, w_freshness]
     if any(w is not None for w in custom_weights):
         config_override = _replace(
             state.config,
             profit_weight=w_profit if w_profit is not None else state.config.profit_weight,
             focus_weight=w_focus if w_focus is not None else state.config.focus_weight,
-            liquidity_weight=w_liquidity if w_liquidity is not None else state.config.liquidity_weight,
+            volume_weight=w_volume if w_volume is not None else state.config.volume_weight,
             freshness_weight=w_freshness if w_freshness is not None else state.config.freshness_weight,
         )
     else:
@@ -118,6 +116,9 @@ def list_items(
     filtered = items
     if category:
         filtered = [i for i in filtered if i.product_id and _matches_category(i, category, state)]
+    else:
+        # When no category is selected, exclude artefacts
+        filtered = [i for i in filtered if i.product_id and _matches_category(i, "artefacts", state) is False]
     if tier is not None:
         filtered = [i for i in filtered if _matches_tier(i, tier, state)]
     if enchantment is not None:
@@ -127,22 +128,52 @@ def list_items(
 
     # Re-sort after filtering
     descending = order == "desc"
-    if sort_by == "profit":
+
+    # Helper: fetch daily volumes via history API for a list of items
+    def _fetch_volumes(item_list: list[ScoredItem]) -> dict[str, float | None]:
+        vols: dict[str, float | None] = {}
+        if not item_list:
+            return vols
+        try:
+            sell_location = "Black Market" if market == "black_market" else city
+            client = AlbionAPIClient()
+            all_ids = [i.product_id for i in item_list]
+            for batch in _chunk(all_ids, 100):
+                history = client.get_history_bulk(batch, sell_location, quality=1, days=7)
+                for pid in batch:
+                    rows = history.get(pid, [])
+                    data_points: list[dict] = []
+                    for row in rows:
+                        data_points.extend(row.get("data", []))
+                    vols[pid] = _extract_daily_volume(data_points) if data_points else None
+            client.close()
+        except Exception:
+            pass
+        return vols
+
+    # When sorting by daily_volume, fetch volumes for ALL filtered items first
+    volumes: dict[str, float | None] = {}
+    if sort_by == "daily_volume":
+        volumes = _fetch_volumes(filtered)
+        filtered.sort(key=lambda x: volumes.get(x.product_id) or 0.0, reverse=descending)
+    elif sort_by == "profit":
         filtered.sort(key=lambda x: x.profit_absolute, reverse=descending)
     elif sort_by == "final_score":
         filtered.sort(key=lambda x: x.final_score, reverse=descending)
     elif sort_by == "profit_per_focus":
         filtered.sort(key=lambda x: x.profit_per_focus, reverse=descending)
-    elif sort_by == "liquidity":
-        filtered.sort(key=lambda x: x.liquidity_score, reverse=descending)
     else:
         filtered.sort(key=lambda x: x.return_rate_pct, reverse=descending)
 
     total = len(filtered)
     page = filtered[offset: offset + limit]
 
+    # For non-volume sorts, fetch volumes only for the current page
+    if sort_by != "daily_volume":
+        volumes = _fetch_volumes(page)
+
     return ItemsResponse(
-        items=[ScoredItemSchema(**_item_dict(i)) for i in page],
+        items=[ScoredItemSchema(**{**_item_dict(i), "daily_volume": volumes.get(i.product_id)}) for i in page],
         total=total,
         filters_applied={
             "city": city,
@@ -181,8 +212,10 @@ def get_item(
 
     recipe = state.get_recipe(item_id)
     cost_breakdown: list[MaterialCost] = []
+    optimized_material_cost: float | None = None
+    optimized_profit: float | None = None
     if recipe:
-        from ...scoring import _get_unit_prices, _index_prices
+        from ...scoring import _get_unit_prices, _index_prices, find_cheapest_city_per_material
 
         price_idx = _index_prices(state.prices)
         unit_prices = _get_unit_prices(recipe.materials, price_idx, target.craft_city)
@@ -198,6 +231,27 @@ def get_item(
                         is_artifact_component=m.is_artifact_component,
                     )
                 )
+
+            # Find cheapest city for each material across all cities
+            cheapest = find_cheapest_city_per_material(recipe.materials, price_idx)
+            for mc in cost_breakdown:
+                info = cheapest.get(mc.item_id)
+                if info:
+                    mc.best_buy_city = info[0]
+                    mc.best_buy_price = info[1]
+
+            # Calculate optimized material cost (using cheapest prices)
+            optimized_material_cost = sum(
+                cheapest[m.item_id][1] * m.quantity
+                for m in recipe.materials
+                if m.item_id in cheapest
+            )
+
+            # Calculate optimized profit using RRR ratio
+            if target.material_cost and target.material_cost > 0:
+                rrr_ratio = target.effective_craft_cost / target.material_cost
+                optimized_effective_cost = optimized_material_cost * rrr_ratio
+                optimized_profit = target.net_revenue - optimized_effective_cost
 
     # City comparison
     city_comparison: list[CityComparison] = []
@@ -225,10 +279,30 @@ def get_item(
             )
         )
 
+    # Fetch daily volume from history API
+    daily_volume: float | None = None
+    try:
+        sell_location = "Black Market" if market == "black_market" else target.craft_city
+        client = AlbionAPIClient()
+        history = client.get_history_bulk([item_id], sell_location, quality=1, days=7)
+        client.close()
+        rows = history.get(item_id, [])
+        # API v2 returns {data: [{item_count, avg_price, timestamp}, ...]} per row
+        data_points: list[dict] = []
+        for row in rows:
+            data_points.extend(row.get("data", []))
+        if data_points:
+            daily_volume = _extract_daily_volume(data_points)
+    except Exception:
+        daily_volume = None
+
     return ItemDetailResponse(
         item=ScoredItemSchema(**_item_dict(target)),
         cost_breakdown=cost_breakdown,
         city_comparison=city_comparison,
+        optimized_material_cost=optimized_material_cost,
+        optimized_profit=optimized_profit,
+        daily_volume=daily_volume,
     )
 
 
@@ -248,7 +322,8 @@ def _item_dict(item: ScoredItem) -> dict:
         "focus_cost": item.focus_cost,
         "profit_per_focus": item.profit_per_focus,
         "freshness_score": item.freshness_score,
-        "liquidity_score": item.liquidity_score,
+        "volume_score": item.volume_score,
+        "volume_norm": item.volume_norm,
         "best_city": item.best_city,
         "final_score": item.final_score,
         "bm_sell_price": item.bm_sell_price,
@@ -258,49 +333,11 @@ def _item_dict(item: ScoredItem) -> dict:
     }
 
 
-_CATEGORY_MAP: dict[str, set[str]] = {
-    "accessories": {"bag"},
-    "armor": {
-        "cloth_armor", "cloth_helmet", "cloth_shoes",
-        "leather_armor", "leather_helmet", "leather_shoes",
-        "plate_armor", "plate_helmet", "plate_shoes",
-        "armors", "head", "shoes",
-    },
-    "cape": {"cape", "capes", "other"},
-    "consumable": {
-        "food", "potion", "fish",
-        "meat_chicken", "meat_cow", "meat_goat", "meat_goose", "meat_pig", "meat_sheep",
-    },
-    "gathering": {"gatherergear"},
-    "melee": {"sword", "axe", "dagger", "hammer", "mace", "spear", "quarterstaff", "knuckles"},
-    "offhand": {"offhand", "offhands", "shieldtype"},
-    "ranged": {
-        "bow", "crossbow",
-        "arcanestaff", "cursestaff", "firestaff", "froststaff",
-        "holystaff", "naturestaff", "shapeshifterstaff",
-    },
-    "tool": {"tools"},
-    "material": {"fiber", "hide", "ore", "rock", "wood", "resources"},
-}
-
-
 def _matches_category(item: ScoredItem, category: str, state: AppState) -> bool:
     recipe = state.get_recipe(item.product_id)
     if recipe is None:
         return False
-    if category == "artifact":
-        return recipe.is_artifact or "_ARTEFACT_" in (item.product_id or "")
-    if category == "mount":
-        return "MOUNT" in (item.product_id or "")
-    allowed = _CATEGORY_MAP.get(category)
-    if allowed is None:
-        return False
-    cat = recipe.category
-    if cat in allowed:
-        return True
-    if category == "cape" and cat.startswith("accessoires_capes_"):
-        return True
-    return False
+    return recipe.category == category
 
 
 def _matches_tier(item: ScoredItem, tier: int, state: AppState) -> bool:

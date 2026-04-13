@@ -7,7 +7,7 @@ import FilterSidebar, {
   ActiveFilterChips,
   type FilterValues,
 } from "@/components/FilterSidebar";
-import { fetchItems, ApiError } from "@/lib/api";
+import { fetchItems, refreshPrices, ApiError } from "@/lib/api";
 import type { ScoredItem, SortField, SortOrder, MarketMode } from "@/lib/types";
 
 const DEFAULT_LIMIT = 25;
@@ -23,7 +23,7 @@ function useFilterValues(searchParams: URLSearchParams): FilterValues {
     minProfit: searchParams.get("min_profit") ?? "",
     w_profit: searchParams.get("w_profit") ?? "",
     w_focus: searchParams.get("w_focus") ?? "",
-    w_liquidity: searchParams.get("w_liquidity") ?? "",
+    w_volume: searchParams.get("w_volume") ?? "",
     w_freshness: searchParams.get("w_freshness") ?? "",
     excludeCaerleon: searchParams.get("exclude_caerleon") ?? "true",
     useFocus: searchParams.get("use_focus") ?? "false",
@@ -48,7 +48,7 @@ function RankingDashboard() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const sortBy = (searchParams.get("sort_by") as SortField) || "liquidity";
+  const sortBy = (searchParams.get("sort_by") as SortField) || "daily_volume";
   const order = (searchParams.get("order") as SortOrder) || "desc";
   const offset = Number(searchParams.get("offset") || "0");
 
@@ -59,6 +59,7 @@ function RankingDashboard() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const updateParam = useCallback(
     (key: string, value: string) => {
@@ -110,7 +111,7 @@ function RankingDashboard() {
         min_profit: filters.minProfit ? Number(filters.minProfit) : undefined,
         w_profit: filters.w_profit ? Number(filters.w_profit) : undefined,
         w_focus: filters.w_focus ? Number(filters.w_focus) : undefined,
-        w_liquidity: filters.w_liquidity ? Number(filters.w_liquidity) : undefined,
+        w_volume: filters.w_volume ? Number(filters.w_volume) : undefined,
         w_freshness: filters.w_freshness ? Number(filters.w_freshness) : undefined,
         exclude_cities: filters.excludeCaerleon === "true" ? "Caerleon" : undefined,
         use_focus: filters.useFocus === "true" ? true : undefined,
@@ -128,7 +129,19 @@ function RankingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_liquidity, filters.w_freshness, filters.excludeCaerleon, filters.useFocus]);
+  }, [sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_volume, filters.w_freshness, filters.excludeCaerleon, filters.useFocus]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshPrices();
+      await load();
+    } catch {
+      // load() already handles its own error state
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   useEffect(() => {
     load();
@@ -167,6 +180,19 @@ function RankingDashboard() {
           {activeFilterCount > 0 && (
             <SummaryPill label="Filtros" value={String(activeFilterCount)} accent />
           )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="ml-auto rounded px-3 py-1.5 text-xs font-medium transition-colors"
+            style={{
+              background: refreshing ? "var(--color-bg-overlay)" : "var(--color-accent-gold)",
+              color: refreshing ? "var(--color-text-muted)" : "var(--color-bg-base)",
+              cursor: refreshing ? "not-allowed" : "pointer",
+              opacity: refreshing ? 0.7 : 1,
+            }}
+          >
+            {refreshing ? "Atualizando..." : "Atualizar Precos"}
+          </button>
         </div>
 
         {/* Active filter chips */}

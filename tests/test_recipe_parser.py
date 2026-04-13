@@ -24,6 +24,7 @@ class ParseItemsJsonTests(unittest.TestCase):
                         "@uniquename": "T4_HEAD_CLOTH_SET1",
                         "@tier": "4",
                         "@craftingcategory": "cloth_helmet",
+                        "@shopcategory": "head",
                         "craftingrequirements": {
                             "@craftingfocus": "429",
                             "craftresource": {
@@ -56,7 +57,7 @@ class ParseItemsJsonTests(unittest.TestCase):
 
         base_recipe = by_id["T4_HEAD_CLOTH_SET1"]
         self.assertEqual(base_recipe.tier, 4)
-        self.assertEqual(base_recipe.category, "cloth_helmet")
+        self.assertEqual(base_recipe.category, "head")
         self.assertEqual(base_recipe.enchantment, 0)
         self.assertEqual(base_recipe.focus_cost, 429)
         self.assertEqual(len(base_recipe.materials), 1)
@@ -78,6 +79,7 @@ class ParseItemsJsonTests(unittest.TestCase):
                         "@uniquename": "T4_2H_BOW_KEEPER",
                         "@tier": "4",
                         "@craftingcategory": "bow",
+                        "@shopcategory": "weapons",
                         "craftingrequirements": [
                             {
                                 "@craftingfocus": "1715",
@@ -121,7 +123,7 @@ class ParseItemsJsonTests(unittest.TestCase):
         recipe = recipes[0]
         self.assertEqual(recipe.product_id, "T4_2H_BOW_KEEPER")
         self.assertEqual(recipe.focus_cost, 1715)
-        self.assertTrue(recipe.is_artifact)
+        self.assertEqual(recipe.category, "weapons")
         self.assertEqual(len(recipe.materials), 2)
         self.assertEqual(recipe.materials[0].item_id, "T4_PLANKS")
         self.assertFalse(recipe.materials[0].is_artifact_component)

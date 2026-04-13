@@ -20,7 +20,7 @@ def get_config(request: Request) -> ConfigResponse:
         is_premium=cfg.is_premium,
         profit_weight=cfg.profit_weight,
         focus_weight=cfg.focus_weight,
-        liquidity_weight=cfg.liquidity_weight,
+        volume_weight=cfg.volume_weight,
         freshness_weight=cfg.freshness_weight,
         min_profit=cfg.min_profit,
         sales_tax_rate=cfg.sales_tax_rate,

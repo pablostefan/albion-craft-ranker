@@ -53,11 +53,11 @@ interface RankingTableProps {
 }
 
 const SORTABLE_COLUMNS: { field: SortField; label: string }[] = [
-  { field: "final_score", label: "Lucro + Liquidez" },
+  { field: "final_score", label: "Lucro + Volume" },
   { field: "return_rate_pct", label: "Retorno %" },
   { field: "profit", label: "Lucro" },
   { field: "profit_per_focus", label: "Lucro/Foco" },
-  { field: "liquidity", label: "Liquidez" },
+  { field: "daily_volume", label: "Vendas/dia (7d)" },
 ];
 
 export default function RankingTable({
@@ -72,7 +72,7 @@ export default function RankingTable({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const currentSort = (searchParams.get("sort_by") as SortField) || "liquidity";
+  const currentSort = (searchParams.get("sort_by") as SortField) || "daily_volume";
   const currentOrder = (searchParams.get("order") as SortOrder) || "desc";
 
   const updateParams = useCallback(
@@ -196,7 +196,7 @@ export default function RankingTable({
                 <th
                   scope="col"
                   key={col.field}
-                  className={`cursor-pointer select-none px-3 py-3 text-left text-xs font-semibold transition-colors hover:text-[var(--color-accent-gold)] ${col.field === "profit_per_focus" ? "hidden md:table-cell" : col.field === "liquidity" ? "hidden lg:table-cell" : ""}`}
+                  className={`cursor-pointer select-none px-3 py-3 text-left text-xs font-semibold transition-colors hover:text-[var(--color-accent-gold)] ${col.field === "profit_per_focus" ? "hidden md:table-cell" : col.field === "daily_volume" ? "hidden lg:table-cell" : ""}`}
                   style={{ color: "var(--color-text-secondary)" }}
                   onClick={() => handleSort(col.field)}
                   role="columnheader"
@@ -358,11 +358,16 @@ function ItemRow({
       </td>
 
       {/* Enchantment */}
-      <td className="hidden px-3 py-3 text-xs md:table-cell" style={{ color: "var(--color-text-secondary)" }}>
-        {extractEnchantment(item.product_id)}
+      <td className="hidden px-3 py-3 text-xs md:table-cell" style={{ color: "var(--color-accent-gold)" }}>
+        {(() => {
+          const enchStr = extractEnchantment(item.product_id);
+          const enchLevel = parseInt(enchStr.replace("@", ""));
+          const stars = "★".repeat(enchLevel) + "☆".repeat(Math.max(0, 4 - enchLevel));
+          return <span>{stars}</span>;
+        })()}
       </td>
 
-      {/* Final score (Lucro + Liquidez) */}
+      {/* Final score (Lucro + Volume) */}
       <td className="px-3 py-3">
         <span
           className="tabular-nums inline-block rounded px-2 py-0.5 text-base font-bold md:text-lg"
@@ -435,9 +440,11 @@ function ItemRow({
         {item.focus_cost > 0 ? formatSilver(item.profit_per_focus) : "—"}
       </td>
 
-      {/* Liquidity */}
-      <td className="hidden px-3 py-3 lg:table-cell">
-        <LiquidityBadge score={item.liquidity_score} />
+      {/* Daily Volume */}
+      <td className="hidden px-3 py-3 text-right tabular-nums lg:table-cell">
+        {item.daily_volume != null
+          ? Math.round(item.daily_volume).toLocaleString("pt-BR")
+          : "—"}
       </td>
 
       {/* Freshness */}
@@ -449,28 +456,6 @@ function ItemRow({
 }
 
 /* ── Badge components ── */
-
-function LiquidityBadge({ score }: { score: number }) {
-  const label = score >= 0.7 ? "Alto" : score >= 0.4 ? "Médio" : "Baixo";
-  const color =
-    score >= 0.7
-      ? "var(--color-profit-strong)"
-      : score >= 0.4
-        ? "var(--color-warning-strong)"
-        : "var(--color-text-muted)";
-  return (
-    <span
-      className="rounded px-1.5 py-0.5 text-xs font-medium"
-      style={{
-        color,
-        background: "var(--color-bg-overlay)",
-        border: `1px solid ${color}33`,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
 
 function FreshnessBadge({ score }: { score: number }) {
   const label = score >= 0.7 ? "Recente" : score >= 0.4 ? "OK" : "Antigo";

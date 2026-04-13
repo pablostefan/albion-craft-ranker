@@ -19,13 +19,15 @@ class ScoredItemSchema(BaseModel):
     focus_cost: int
     profit_per_focus: float
     freshness_score: float
-    liquidity_score: float
+    volume_score: float
+    volume_norm: float
     best_city: str
     final_score: float
     bm_sell_price: float | None = None
     bm_net_revenue: float | None = None
     bm_profit: float | None = None
     bm_return_rate_pct: float | None = None
+    daily_volume: float | None = None
 
 
 class ItemsResponse(BaseModel):
@@ -40,6 +42,8 @@ class MaterialCost(BaseModel):
     unit_price: float
     total_price: float
     is_artifact_component: bool
+    best_buy_city: str | None = None
+    best_buy_price: float | None = None
 
 
 class CityComparison(BaseModel):
@@ -53,6 +57,9 @@ class ItemDetailResponse(BaseModel):
     item: ScoredItemSchema
     cost_breakdown: list[MaterialCost]
     city_comparison: list[CityComparison]
+    optimized_material_cost: float | None = None
+    optimized_profit: float | None = None
+    daily_volume: float | None = None
 
 
 class CityBonusSchema(BaseModel):
@@ -76,7 +83,7 @@ class ConfigResponse(BaseModel):
     is_premium: bool
     profit_weight: float
     focus_weight: float
-    liquidity_weight: float
+    volume_weight: float
     freshness_weight: float
     min_profit: float
     sales_tax_rate: float

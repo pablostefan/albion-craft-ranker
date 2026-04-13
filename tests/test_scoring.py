@@ -41,11 +41,10 @@ def _mp(
 
 def _recipe(
     product_id: str = "T4_CLOTH_ARMOR",
-    category: str = "cloth_armor",
+    category: str = "armors",
     tier: int = 4,
     materials: list[Material] | None = None,
     focus_cost: int = 100,
-    is_artifact: bool = False,
     amount_crafted: int = 1,
 ) -> Recipe:
     if materials is None:
@@ -57,7 +56,6 @@ def _recipe(
         enchantment=0,
         materials=materials,
         focus_cost=focus_cost,
-        is_artifact=is_artifact,
         amount_crafted=amount_crafted,
     )
 
@@ -71,7 +69,7 @@ def _cfg(**kwargs: object) -> ScoringConfig:
         is_premium=True,
         profit_weight=0.5,
         focus_weight=0.2,
-        liquidity_weight=0.2,
+        volume_weight=0.2,
         freshness_weight=0.1,
         min_profit=0.0,
     )
@@ -171,7 +169,7 @@ class TestRankItemsV2Taxes(unittest.TestCase):
             normal_tax_rate=0.08,
             profit_weight=1.0,
             focus_weight=0.0,
-            liquidity_weight=0.0,
+            volume_weight=0.0,
             freshness_weight=0.0,
         )
         results = rank_items_v2(
@@ -221,7 +219,7 @@ class TestRankItemsV2SellModes(unittest.TestCase):
             _mp("PROD", "Brecilien", sell_min=10000.0, buy_max=8000.0),
             _mp("PROD", "Black Market", sell_min=0.0, buy_max=15000.0),
         ]
-        config = _cfg(profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0)
+        config = _cfg(profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0)
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
             config=config, craft_city="Brecilien", sell_mode="black_market",
@@ -237,7 +235,7 @@ class TestRankItemsV2SellModes(unittest.TestCase):
         ]
         config = _cfg(
             is_premium=True, premium_tax_rate=0.04,
-            profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0,
+            profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0,
         )
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
@@ -253,7 +251,7 @@ class TestRankItemsV2SellModes(unittest.TestCase):
             _mp("PROD", "Brecilien", sell_min=12000.0, buy_max=10000.0),
             _mp("PROD", "Black Market", sell_min=0.0, buy_max=14000.0),
         ]
-        config = _cfg(profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0)
+        config = _cfg(profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0)
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
             config=config, craft_city="Brecilien", sell_mode="comparison",
@@ -276,7 +274,7 @@ class TestRankItemsV2SellModes(unittest.TestCase):
             _mp("PROD", "Brecilien", sell_min=12000.0, buy_max=10000.0),
             _mp("PROD", "Black Market", sell_min=0.0, buy_max=14000.0),
         ]
-        config = _cfg(profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0)
+        config = _cfg(profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0)
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
             config=config, craft_city="Brecilien", sell_mode="comparison",
@@ -340,7 +338,7 @@ class TestRankItemsV2ArtifactCost(unittest.TestCase):
         ]
         config = _cfg(
             profit_weight=1.0, focus_weight=0.0,
-            liquidity_weight=0.0, freshness_weight=0.0,
+            volume_weight=0.0, freshness_weight=0.0,
         )
         results = rank_items_v2(
             recipes=[recipe], prices=prices,
@@ -535,7 +533,7 @@ class TestRankItemsV2BestCity(unittest.TestCase):
         recipe = _recipe("T4_BAG", "bag", materials=[Material("T4_CLOTH", 8, False)], focus_cost=0)
         prices = self._all_city_prices("T4_BAG", "T4_CLOTH")
         # city_bonuses=None usa os defaults do rrr_engine (Brecilien bag=0.15)
-        config = _cfg(profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0)
+        config = _cfg(profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0)
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
             config=config, craft_city="Lymhurst",
@@ -564,7 +562,7 @@ class TestRankItemsV2ScoringWeights(unittest.TestCase):
             ScoringConfig(
                 profit_weight=0.5,
                 focus_weight=0.3,
-                liquidity_weight=0.3,
+                volume_weight=0.3,
                 freshness_weight=0.1,  # sum = 1.2, invalid
             )
 
@@ -597,14 +595,14 @@ class TestRankItemsV2ScoringWeights(unittest.TestCase):
 
 class TestRankItemsV2Ordering(unittest.TestCase):
     def test_sorted_by_final_score_descending(self) -> None:
-        r1 = Recipe("PROD_A", "cloth_armor", 4, 0, [Material("MAT", 5, False)], 50, False)
-        r2 = Recipe("PROD_B", "cloth_armor", 4, 0, [Material("MAT", 5, False)], 50, False)
+        r1 = Recipe("PROD_A", "armors", 4, 0, [Material("MAT", 5, False)], 50)
+        r2 = Recipe("PROD_B", "armors", 4, 0, [Material("MAT", 5, False)], 50)
         prices = [
             _mp("MAT", "Lymhurst", sell_min=1000.0),
             _mp("PROD_A", "Lymhurst", sell_min=50000.0, buy_max=40000.0),  # higher profit
             _mp("PROD_B", "Lymhurst", sell_min=20000.0, buy_max=15000.0),  # lower profit
         ]
-        config = _cfg(profit_weight=1.0, focus_weight=0.0, liquidity_weight=0.0, freshness_weight=0.0)
+        config = _cfg(profit_weight=1.0, focus_weight=0.0, volume_weight=0.0, freshness_weight=0.0)
         results = rank_items_v2(
             recipes=[r1, r2], prices=prices, city_bonuses=None,
             config=config, craft_city="Lymhurst",
@@ -620,7 +618,7 @@ class TestRankItemsV2Ordering(unittest.TestCase):
             _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
             _mp("PROD", "Lymhurst", sell_min=25000.0, buy_max=20000.0),
         ]
-        config = _cfg(freshness_weight=0.0, liquidity_weight=0.0, focus_weight=0.0, profit_weight=1.0)
+        config = _cfg(freshness_weight=0.0, volume_weight=0.0, focus_weight=0.0, profit_weight=1.0)
         results = rank_items_v2(
             recipes=[recipe], prices=prices, city_bonuses=None,
             config=config, craft_city="Lymhurst",
@@ -675,9 +673,9 @@ class TestBackwardCompatibility(unittest.TestCase):
             quality=1,
             return_rate=0.15,
             tax_rate=0.065,
-            liquidity_days=7,
+            volume_days=7,
             profit_weight=0.7,
-            liquidity_weight=0.3,
+            volume_weight=0.3,
             min_profit=0.0,
             use_history=False,
         )

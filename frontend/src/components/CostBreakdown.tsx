@@ -6,6 +6,8 @@ import { formatSilver, itemIconUrl } from "@/lib/format";
 interface CostBreakdownProps {
   materials: MaterialCost[];
   item: ScoredItem;
+  optimizedMaterialCost?: number | null;
+  optimizedProfit?: number | null;
 }
 
 function extractMaterialName(itemId: string): string {
@@ -15,7 +17,7 @@ function extractMaterialName(itemId: string): string {
     .replace(/_/g, " ");
 }
 
-export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
+export default function CostBreakdown({ materials, item, optimizedMaterialCost, optimizedProfit }: CostBreakdownProps) {
   const grossMaterialCost = materials.reduce((sum, m) => sum + m.total_price, 0);
   const rrrSavings = grossMaterialCost - item.effective_craft_cost;
 
@@ -42,6 +44,7 @@ export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
               <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>Preço Unit.</th>
               <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>Subtotal</th>
               <th scope="col" className="hidden px-4 py-3 text-center text-xs font-semibold sm:table-cell" style={{ color: "var(--color-text-secondary)" }}>RRR Aplicado</th>
+              <th scope="col" className="hidden px-4 py-3 text-center text-xs font-semibold sm:table-cell" style={{ color: "var(--color-text-secondary)" }}>Melhor Cidade</th>
             </tr>
           </thead>
           <tbody>
@@ -115,6 +118,29 @@ export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
                       </span>
                     )}
                   </td>
+                  <td className="hidden px-4 py-3 text-center text-xs sm:table-cell">
+                    {mat.best_buy_city ? (
+                      <span
+                        style={{
+                          color: mat.best_buy_city !== item.craft_city
+                            ? "var(--color-profit-strong)"
+                            : "var(--color-text-muted)",
+                        }}
+                      >
+                        {mat.best_buy_city}
+                        {mat.best_buy_price != null && mat.best_buy_price !== mat.unit_price && (
+                          <span
+                            className="block text-[10px]"
+                            style={{ color: "var(--color-text-muted)" }}
+                          >
+                            ({formatSilver(mat.best_buy_price)})
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--color-text-muted)" }}>—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -131,6 +157,7 @@ export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
                 {formatSilver(grossMaterialCost)}
               </td>
               <td className="hidden sm:table-cell" />
+              <td className="hidden sm:table-cell" />
             </tr>
             <tr>
               <td colSpan={3} className="px-4 py-2 text-right text-xs font-semibold" style={{ color: "var(--color-profit-strong)" }}>
@@ -142,6 +169,7 @@ export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
               >
                 -{formatSilver(rrrSavings)}
               </td>
+              <td className="hidden sm:table-cell" />
               <td className="hidden sm:table-cell" />
             </tr>
             <tr style={{ borderTop: "1px solid var(--color-border-default)" }}>
@@ -155,7 +183,65 @@ export default function CostBreakdown({ materials, item }: CostBreakdownProps) {
                 {formatSilver(item.effective_craft_cost)}
               </td>
               <td className="hidden sm:table-cell" />
+              <td className="hidden sm:table-cell" />
             </tr>
+            {optimizedMaterialCost != null && (
+              <>
+                <tr>
+                  <td colSpan={6} className="px-4 py-0">
+                    <div style={{ borderTop: "1px dashed var(--color-border-default)" }} />
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan={3} className="px-4 py-2 text-right text-xs font-semibold" style={{ color: "var(--color-info)" }}>
+                    Custo Otimizado (melhor cidade)
+                  </td>
+                  <td
+                    className="tabular-nums px-4 py-2 text-right text-sm font-semibold"
+                    style={{ fontFamily: "var(--font-plex-mono), monospace", color: "var(--color-info)" }}
+                  >
+                    {formatSilver(optimizedMaterialCost)}
+                  </td>
+                  <td className="hidden sm:table-cell" />
+                  <td className="hidden sm:table-cell" />
+                </tr>
+                {optimizedProfit != null && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-2 text-right text-xs font-bold" style={{ color: "var(--color-text-primary)" }}>
+                      Lucro Otimizado
+                    </td>
+                    <td
+                      className="tabular-nums px-4 py-2 text-right text-sm font-bold"
+                      style={{
+                        fontFamily: "var(--font-plex-mono), monospace",
+                        color: optimizedProfit >= 0
+                          ? "var(--color-profit-strong)"
+                          : "var(--color-loss-strong)",
+                      }}
+                    >
+                      {formatSilver(optimizedProfit)}
+                    </td>
+                    <td className="hidden sm:table-cell" />
+                    <td className="hidden sm:table-cell" />
+                  </tr>
+                )}
+                {optimizedProfit != null && (optimizedProfit - item.profit_absolute) > 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-2 text-right text-xs font-semibold" style={{ color: "var(--color-profit-strong)" }}>
+                      Economia Potencial
+                    </td>
+                    <td
+                      className="tabular-nums px-4 py-2 text-right text-sm font-semibold"
+                      style={{ fontFamily: "var(--font-plex-mono), monospace", color: "var(--color-profit-strong)" }}
+                    >
+                      +{formatSilver(optimizedProfit - item.profit_absolute)}
+                    </td>
+                    <td className="hidden sm:table-cell" />
+                    <td className="hidden sm:table-cell" />
+                  </tr>
+                )}
+              </>
+            )}
           </tfoot>
         </table>
       </div>

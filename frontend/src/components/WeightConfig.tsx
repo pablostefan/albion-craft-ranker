@@ -5,7 +5,7 @@ import { useCallback } from "react";
 interface Weights {
   profit_weight: number;
   focus_weight: number;
-  liquidity_weight: number;
+  volume_weight: number;
   freshness_weight: number;
 }
 
@@ -14,7 +14,7 @@ type WeightKey = keyof Weights;
 const WEIGHT_LABELS: { key: WeightKey; label: string }[] = [
   { key: "profit_weight", label: "Lucro" },
   { key: "focus_weight", label: "Foco" },
-  { key: "liquidity_weight", label: "Liquidez" },
+  { key: "volume_weight", label: "Vol. Diário" },
   { key: "freshness_weight", label: "Atualização" },
 ];
 

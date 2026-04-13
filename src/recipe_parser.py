@@ -91,12 +91,11 @@ def _parse_recipe_definition(
 
     return Recipe(
         product_id=product_id,
-        category=str(item.get("@craftingcategory") or item.get("@shopsubcategory1") or "").strip(),
+        category=str(item.get("@shopcategory") or "").strip().lower(),
         tier=_as_int(item.get("@tier")),
         enchantment=enchantment,
         materials=materials,
         focus_cost=_extract_focus_cost(recipe_data),
-        is_artifact=any(material.is_artifact_component for material in materials),
         amount_crafted=max(1, _as_int(recipe_data.get("@amountcrafted"), default=1)),
     )
 

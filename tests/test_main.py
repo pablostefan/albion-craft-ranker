@@ -184,7 +184,8 @@ class TestSaveRankingCsvV2(unittest.TestCase):
             focus_cost=100,
             profit_per_focus=5.8,
             freshness_score=0.9,
-            liquidity_score=0.7,
+            volume_score=0.7,
+            volume_norm=0.65,
             best_city="Lymhurst",
             final_score=0.85,
         )

@@ -18,7 +18,6 @@ class Recipe:
     enchantment: int
     materials: list[Material]
     focus_cost: int
-    is_artifact: bool
     amount_crafted: int = 1
 
 
@@ -40,9 +39,9 @@ class ScoringConfig:
     premium_tax_rate: float = 0.04
     normal_tax_rate: float = 0.08
     is_premium: bool = True
-    profit_weight: float = 0.5
-    focus_weight: float = 0.2
-    liquidity_weight: float = 0.2
+    profit_weight: float = 0.25
+    focus_weight: float = 0.1
+    volume_weight: float = 0.55
     freshness_weight: float = 0.1
     min_profit: float = 0.0
 
@@ -50,7 +49,7 @@ class ScoringConfig:
         total = (
             self.profit_weight
             + self.focus_weight
-            + self.liquidity_weight
+            + self.volume_weight
             + self.freshness_weight
         )
         if abs(total - 1.0) > 1e-6:
@@ -95,7 +94,8 @@ class ScoredItem:
     focus_cost: int
     profit_per_focus: float
     freshness_score: float
-    liquidity_score: float
+    volume_score: float
+    volume_norm: float
     best_city: str
     final_score: float
     # Comparison mode extras (None in other modes)

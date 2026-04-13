@@ -43,12 +43,11 @@ def _mp(
 
 def _recipe(
     product_id: str = "T4_CLOTH_ARMOR",
-    category: str = "cloth_armor",
+    category: str = "armors",
     tier: int = 4,
     enchantment: int = 0,
     materials: list[Material] | None = None,
     focus_cost: int = 100,
-    is_artifact: bool = False,
     amount_crafted: int = 1,
 ) -> Recipe:
     if materials is None:
@@ -60,7 +59,6 @@ def _recipe(
         enchantment=enchantment,
         materials=materials,
         focus_cost=focus_cost,
-        is_artifact=is_artifact,
         amount_crafted=amount_crafted,
     )
 
@@ -184,12 +182,12 @@ class TestListItems(unittest.TestCase):
         vals = [i["profit_per_focus"] for i in body["items"]]
         self.assertEqual(vals, sorted(vals, reverse=True))
 
-    def test_default_sort_uses_liquidity_desc(self) -> None:
+    def test_default_sort_uses_volume_desc(self) -> None:
         resp = self.client.get("/items")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        values = [i["liquidity_score"] for i in body["items"]]
-        self.assertEqual(body["filters_applied"]["sort_by"], "liquidity")
+        values = [i["volume_score"] for i in body["items"]]
+        self.assertEqual(body["filters_applied"]["sort_by"], "daily_volume")
         self.assertEqual(values, sorted(values, reverse=True))
 
     def test_sort_by_final_score(self) -> None:

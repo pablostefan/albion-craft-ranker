@@ -9,33 +9,41 @@ import { fetchConfig } from "@/lib/api";
 /* ── Constants ── */
 
 const CATEGORIES = [
-  "accessories",
-  "armor",
-  "artifact",
-  "cape",
-  "consumable",
+  "armors",
+  "artefacts",
+  "bags",
+  "capes",
+  "consumables",
+  "crafting",
+  "farming",
+  "furniture",
   "gathering",
-  "material",
-  "melee",
-  "mount",
-  "offhand",
-  "ranged",
-  "tool",
+  "head",
+  "mounts",
+  "offhands",
+  "other",
+  "shoes",
+  "vanity",
+  "weapons",
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  accessories: "Acessórios",
-  armor: "Armadura",
-  artifact: "Artefato",
-  cape: "Capa",
-  consumable: "Consumível",
+  armors: "Armaduras",
+  artefacts: "Artefatos",
+  bags: "Bolsas",
+  capes: "Capas",
+  consumables: "Consumíveis",
+  crafting: "Materiais",
+  farming: "Fazenda",
+  furniture: "Mobília",
   gathering: "Coleta",
-  material: "Material",
-  melee: "Corpo a Corpo",
-  mount: "Montaria",
-  offhand: "Off-hand",
-  ranged: "À Distância",
-  tool: "Ferramenta",
+  head: "Cabeça",
+  mounts: "Montarias",
+  offhands: "Off-hand",
+  other: "Outros",
+  shoes: "Calçados",
+  vanity: "Vaidade",
+  weapons: "Armas",
 };
 
 const TIERS = [4, 5, 6, 7, 8] as const;
@@ -64,7 +72,7 @@ const QUALITY_OPTIONS: { value: number; label: string }[] = [
 interface Weights {
   profit_weight: number;
   focus_weight: number;
-  liquidity_weight: number;
+  volume_weight: number;
   freshness_weight: number;
 }
 
@@ -80,7 +88,7 @@ export interface FilterValues {
   minProfit: string;
   w_profit: string;
   w_focus: string;
-  w_liquidity: string;
+  w_volume: string;
   w_freshness: string;
   excludeCaerleon: string;
   useFocus: string;
@@ -112,7 +120,11 @@ export function ActiveFilterChips({
   }
   if (filters.category) chips.push({ key: "category", label: "Categoria", value: CATEGORY_LABELS[filters.category] ?? filters.category });
   if (filters.tier) chips.push({ key: "tier", label: "Tier", value: `T${filters.tier}` });
-  if (filters.enchantment) chips.push({ key: "enchantment", label: "Enc", value: `@${filters.enchantment}` });
+  if (filters.enchantment) {
+    const encLevel = parseInt(filters.enchantment);
+    const stars = "★".repeat(encLevel) + "☆".repeat(Math.max(0, 4 - encLevel));
+    chips.push({ key: "enchantment", label: "Enc", value: stars });
+  }
   if (filters.city) chips.push({ key: "city", label: "Cidade", value: filters.city });
   if (filters.quality) {
     const q = QUALITY_OPTIONS.find((o) => String(o.value) === filters.quality);
@@ -282,10 +294,10 @@ export default function FilterSidebar({
 
   /* Weight state */
   const [weights, setWeights] = useState<Weights>({
-    profit_weight: filters.w_profit ? parseFloat(filters.w_profit) : 0.4,
-    focus_weight: filters.w_focus ? parseFloat(filters.w_focus) : 0.2,
-    liquidity_weight: filters.w_liquidity ? parseFloat(filters.w_liquidity) : 0.2,
-    freshness_weight: filters.w_freshness ? parseFloat(filters.w_freshness) : 0.2,
+    profit_weight: filters.w_profit ? parseFloat(filters.w_profit) : 0.25,
+    focus_weight: filters.w_focus ? parseFloat(filters.w_focus) : 0.1,
+    volume_weight: filters.w_volume ? parseFloat(filters.w_volume) : 0.55,
+    freshness_weight: filters.w_freshness ? parseFloat(filters.w_freshness) : 0.1,
   });
   const [defaultWeights, setDefaultWeights] = useState<Weights | null>(null);
 
@@ -295,12 +307,12 @@ export default function FilterSidebar({
         const dw: Weights = {
           profit_weight: cfg.profit_weight,
           focus_weight: cfg.focus_weight,
-          liquidity_weight: cfg.liquidity_weight,
+          volume_weight: cfg.volume_weight,
           freshness_weight: cfg.freshness_weight,
         };
         setDefaultWeights(dw);
         // Only set weights from defaults if not overridden via URL
-        if (!filters.w_profit && !filters.w_focus && !filters.w_liquidity && !filters.w_freshness) {
+        if (!filters.w_profit && !filters.w_focus && !filters.w_volume && !filters.w_freshness) {
           setWeights(dw);
         }
       })
@@ -367,7 +379,7 @@ export default function FilterSidebar({
       setWeights(newWeights);
       onFilterChange("w_profit", newWeights.profit_weight.toFixed(2));
       onFilterChange("w_focus", newWeights.focus_weight.toFixed(2));
-      onFilterChange("w_liquidity", newWeights.liquidity_weight.toFixed(2));
+      onFilterChange("w_volume", newWeights.volume_weight.toFixed(2));
       onFilterChange("w_freshness", newWeights.freshness_weight.toFixed(2));
     },
     [onFilterChange],
@@ -378,7 +390,7 @@ export default function FilterSidebar({
     setWeights(defaultWeights);
     onFilterChange("w_profit", "");
     onFilterChange("w_focus", "");
-    onFilterChange("w_liquidity", "");
+    onFilterChange("w_volume", "");
     onFilterChange("w_freshness", "");
   }, [defaultWeights, onFilterChange]);
 
