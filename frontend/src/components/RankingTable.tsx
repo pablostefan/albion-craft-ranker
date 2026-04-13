@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
-import type { ScoredItem, SortField, SortOrder } from "@/lib/types";
+import type { ScoredItem, LookupItem, SortField, SortOrder } from "@/lib/types";
 import { formatPct, formatSilver, extractItemName, extractTier, extractEnchantment, itemIconUrl } from "@/lib/format";
 
 /* ── Sort indicator ── */
@@ -44,7 +44,7 @@ function SkeletonRow({ index }: { index: number }) {
 /* ── Main component ── */
 
 interface RankingTableProps {
-  items: ScoredItem[];
+  items: (ScoredItem | LookupItem)[];
   total: number;
   loading: boolean;
   error: string | null;
@@ -204,7 +204,7 @@ export default function RankingTable({
                 <th
                   scope="col"
                   key={col.field}
-                  className={`cursor-pointer select-none px-3 py-3 text-left text-xs font-semibold transition-colors hover:text-[var(--color-accent-gold)] ${col.field === "profit_per_focus" ? "hidden md:table-cell" : col.field === "daily_volume" ? "hidden lg:table-cell" : ""}`}
+                  className={`cursor-pointer select-none px-3 py-3 text-xs font-semibold transition-colors hover:text-[var(--color-accent-gold)] ${col.field === "daily_volume" ? "hidden text-right lg:table-cell" : col.field === "profit_per_focus" ? "hidden text-left md:table-cell" : "text-left"}`}
                   style={{ color: "var(--color-text-secondary)" }}
                   onClick={() => handleSort(col.field)}
                   role="columnheader"
@@ -300,6 +300,12 @@ export default function RankingTable({
   );
 }
 
+/* ── Type guard ── */
+
+function isScoredItem(item: ScoredItem | LookupItem): item is ScoredItem {
+  return "final_score" in item;
+}
+
 /* ── Item row ── */
 
 function ItemRow({
@@ -309,14 +315,15 @@ function ItemRow({
   isFavorite,
   onToggleFavorite,
 }: {
-  item: ScoredItem;
+  item: ScoredItem | LookupItem;
   rank: number;
   onClick: () => void;
   isFavorite: boolean;
   onToggleFavorite: () => void;
 }) {
-  const isPositive = item.return_rate_pct > 0.5;
-  const isNegative = item.return_rate_pct < -0.5;
+  const returnRate = item.return_rate_pct ?? 0;
+  const isPositive = returnRate > 0.5;
+  const isNegative = returnRate < -0.5;
 
   const borderColor = isPositive
     ? "var(--color-profit-strong)"
@@ -412,7 +419,7 @@ function ItemRow({
                 : "var(--color-info)",
           }}
         >
-          {(item.final_score * 100).toFixed(1)}
+          {isScoredItem(item) ? (item.final_score * 100).toFixed(1) : "—"}
         </span>
       </td>
 
@@ -434,12 +441,14 @@ function ItemRow({
                 : "var(--color-info)",
           }}
           aria-label={
-            isNegative
-              ? `negative return rate ${item.return_rate_pct.toFixed(1)} percent`
-              : `${item.return_rate_pct.toFixed(1)} percent return rate`
+            item.return_rate_pct != null
+              ? isNegative
+                ? `negative return rate ${item.return_rate_pct.toFixed(1)} percent`
+                : `${item.return_rate_pct.toFixed(1)} percent return rate`
+              : "no return rate data"
           }
         >
-          {formatPct(item.return_rate_pct)}
+          {item.return_rate_pct != null ? formatPct(item.return_rate_pct) : "—"}
         </span>
       </td>
 
@@ -448,12 +457,12 @@ function ItemRow({
         className="tabular-nums px-3 py-3 text-sm"
         style={{
           fontFamily: "var(--font-plex-mono), IBM Plex Mono, Menlo, monospace",
-          color: item.profit_absolute >= 0
+          color: (item.profit_absolute ?? 0) >= 0
             ? "var(--color-profit-strong)"
             : "var(--color-loss-strong)",
         }}
       >
-        {formatSilver(item.profit_absolute)}
+        {item.profit_absolute != null ? formatSilver(item.profit_absolute) : "—"}
       </td>
 
       {/* Profit per focus */}
@@ -464,19 +473,19 @@ function ItemRow({
           color: "var(--color-text-secondary)",
         }}
       >
-        {item.focus_cost > 0 ? formatSilver(item.profit_per_focus) : "—"}
+        {isScoredItem(item) && item.focus_cost > 0 ? formatSilver(item.profit_per_focus) : "—"}
       </td>
 
       {/* Daily Volume */}
       <td className="hidden px-3 py-3 text-right tabular-nums lg:table-cell">
-        {item.daily_volume != null
+        {isScoredItem(item) && item.daily_volume != null
           ? Math.round(item.daily_volume).toLocaleString("pt-BR")
           : "—"}
       </td>
 
       {/* Freshness */}
       <td className="hidden px-3 py-3 lg:table-cell">
-        <FreshnessBadge score={item.freshness_score} />
+        {isScoredItem(item) ? <FreshnessBadge score={item.freshness_score} /> : <span>—</span>}
       </td>
     </tr>
   );

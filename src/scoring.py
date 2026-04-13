@@ -271,19 +271,33 @@ def _get_unit_prices(
 ) -> Dict[str, float] | None:
     """Retorna {material_id: unit_price} para a cidade.
 
-    Contrato para task_006 / task_007: retorna None quando qualquer material
-    estiver sem preco valido; o chamador registra o item como
-    ``item_skipped=missing_material_price`` nos metadados da resposta.
+    Tenta primeiro o preco na cidade de craft; se indisponivel, busca o menor
+    preco valido em qualquer outra cidade (fallback cross-city).  Retorna None
+    apenas quando nenhuma cidade possui preco valido para algum material.
     """
     unit_prices: Dict[str, float] = {}
     for m in materials:
         mp = price_idx.get((m.item_id, city))
-        if mp is None:
+        if mp is not None:
+            price = mp.sell_price_min if mp.sell_price_min > 0 else mp.buy_price_max
+            if price > 0:
+                unit_prices[m.item_id] = price
+                continue
+
+        # Fallback: menor preco valido em qualquer cidade
+        best_price = 0.0
+        for fallback_city in SUPPORTED_CITIES:
+            if fallback_city == city:
+                continue
+            mp_fb = price_idx.get((m.item_id, fallback_city))
+            if mp_fb is None:
+                continue
+            p = mp_fb.sell_price_min if mp_fb.sell_price_min > 0 else mp_fb.buy_price_max
+            if p > 0 and (best_price == 0.0 or p < best_price):
+                best_price = p
+        if best_price <= 0:
             return None
-        price = mp.sell_price_min if mp.sell_price_min > 0 else mp.buy_price_max
-        if price <= 0:
-            return None
-        unit_prices[m.item_id] = price
+        unit_prices[m.item_id] = best_price
     return unit_prices
 
 
@@ -483,6 +497,15 @@ def rank_items_v2(
         volume: float = 0.0
 
         mp_sell = price_idx.get((recipe.product_id, _sell_city))
+        # Fallback: buscar melhor preco de venda em qualquer cidade
+        if mp_sell is None or mp_sell.sell_price_min <= 0:
+            for fb_city in SUPPORTED_CITIES:
+                if fb_city == _sell_city:
+                    continue
+                fb = price_idx.get((recipe.product_id, fb_city))
+                if fb is not None and fb.sell_price_min > 0:
+                    if mp_sell is None or mp_sell.sell_price_min <= 0 or fb.sell_price_min < mp_sell.sell_price_min:
+                        mp_sell = fb
         mp_bm = price_idx.get((recipe.product_id, _BM_LOCATION))
 
         if sell_mode in ("marketplace", "comparison"):
