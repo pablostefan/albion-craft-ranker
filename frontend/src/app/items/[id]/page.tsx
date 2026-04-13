@@ -15,12 +15,15 @@ import {
 } from "@/lib/format";
 import CostBreakdown from "@/components/CostBreakdown";
 import CityComparisonTable from "@/components/CityComparison";
+import { useFavorites } from "@/lib/favorites";
 
 export default function ItemDetailPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
 
   const productId = decodeURIComponent(params.id);
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const favorited = isFavorite(productId);
   const city = searchParams.get("city") ?? undefined;
   const market = searchParams.get("market") ?? undefined;
   const sellCity = searchParams.get("sell_city") ?? undefined;
@@ -155,6 +158,14 @@ export default function ItemDetailPage() {
               {enchantment}
             </span>
           )}
+          <button
+            onClick={() => toggleFavorite(productId)}
+            className="ml-1 text-2xl leading-none transition-transform hover:scale-125"
+            style={{ color: favorited ? "var(--color-accent-gold)" : "var(--color-text-muted)" }}
+            aria-label={favorited ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+          >
+            {favorited ? "★" : "☆"}
+          </button>
         </div>
 
         <div

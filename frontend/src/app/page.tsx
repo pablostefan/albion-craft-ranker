@@ -8,6 +8,7 @@ import FilterSidebar, {
   type FilterValues,
 } from "@/components/FilterSidebar";
 import { fetchItems, refreshPrices, ApiError } from "@/lib/api";
+import { useFavorites } from "@/lib/favorites";
 import type { ScoredItem, SortField, SortOrder, MarketMode } from "@/lib/types";
 
 const DEFAULT_LIMIT = 25;
@@ -46,6 +47,10 @@ function countActiveFilters(f: FilterValues): number {
   return n;
 }
 
+function useFavoritesOnly(searchParams: URLSearchParams) {
+  return searchParams.get("favorites_only") === "true";
+}
+
 function RankingDashboard() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -56,6 +61,8 @@ function RankingDashboard() {
 
   const filters = useFilterValues(searchParams);
   const activeFilterCount = countActiveFilters(filters);
+  const showFavoritesOnly = useFavoritesOnly(searchParams);
+  const { favorites, toggleFavorite } = useFavorites();
 
   const [items, setItems] = useState<ScoredItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -94,6 +101,14 @@ function RankingDashboard() {
     (key: string) => updateParam(key, ""),
     [updateParam],
   );
+
+  const toggleFavoritesOnly = useCallback(() => {
+    updateParam("favorites_only", showFavoritesOnly ? "" : "true");
+  }, [updateParam, showFavoritesOnly]);
+
+  const displayItems = showFavoritesOnly
+    ? items.filter((i) => favorites.has(i.product_id))
+    : items;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -158,6 +173,9 @@ function RankingDashboard() {
         onFilterChange={updateParam}
         onReset={resetFilters}
         activeFilterCount={activeFilterCount}
+        showFavoritesOnly={showFavoritesOnly}
+        onToggleFavoritesOnly={toggleFavoritesOnly}
+        favoritesCount={favorites.size}
       />
 
       {/* Main content */}
@@ -199,16 +217,18 @@ function RankingDashboard() {
         </div>
 
         {/* Active filter chips */}
-        <ActiveFilterChips filters={filters} onRemove={removeFilter} />
+        <ActiveFilterChips filters={filters} onRemove={removeFilter} showFavoritesOnly={showFavoritesOnly} />
 
         <RankingTable
-          items={items}
-          total={total}
+          items={displayItems}
+          total={showFavoritesOnly ? displayItems.length : total}
           loading={loading}
           error={error}
           onRetry={load}
-          offset={offset}
-          limit={DEFAULT_LIMIT}
+          offset={showFavoritesOnly ? 0 : offset}
+          limit={showFavoritesOnly ? displayItems.length : DEFAULT_LIMIT}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
         />
       </div>
     </div>

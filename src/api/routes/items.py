@@ -354,6 +354,7 @@ def _item_dict(item: ScoredItem) -> dict:
         "bm_profit": item.bm_profit,
         "bm_return_rate_pct": item.bm_return_rate_pct,
         "display_name": item.display_name,
+        "silver_cost": item.silver_cost,
     }
 
 

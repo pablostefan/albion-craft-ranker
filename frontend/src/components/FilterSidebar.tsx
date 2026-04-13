@@ -106,11 +106,17 @@ interface ActiveChip {
 export function ActiveFilterChips({
   filters,
   onRemove,
+  showFavoritesOnly,
 }: {
   filters: FilterValues;
   onRemove: (key: string) => void;
+  showFavoritesOnly?: boolean;
 }) {
   const chips: ActiveChip[] = [];
+
+  if (showFavoritesOnly) {
+    chips.push({ key: "favorites_only", label: "Favoritos", value: "Sim" });
+  }
 
   if (filters.market !== "marketplace") {
     chips.push({
@@ -282,6 +288,9 @@ interface FilterSidebarProps {
   onFilterChange: (key: string, value: string) => void;
   onReset: () => void;
   activeFilterCount: number;
+  showFavoritesOnly: boolean;
+  onToggleFavoritesOnly: () => void;
+  favoritesCount: number;
 }
 
 export default function FilterSidebar({
@@ -289,6 +298,9 @@ export default function FilterSidebar({
   onFilterChange,
   onReset,
   activeFilterCount,
+  showFavoritesOnly,
+  onToggleFavoritesOnly,
+  favoritesCount,
 }: FilterSidebarProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -410,6 +422,39 @@ export default function FilterSidebar({
 
   const filterControls = (
     <div className="space-y-5">
+      {/* Favorites only toggle */}
+      <label
+        className="flex cursor-pointer items-center gap-3"
+        htmlFor="toggle-favorites-only"
+      >
+        <div className="relative">
+          <input
+            id="toggle-favorites-only"
+            type="checkbox"
+            checked={showFavoritesOnly}
+            onChange={onToggleFavoritesOnly}
+            className="peer sr-only"
+          />
+          <div
+            className="h-6 w-11 rounded-full transition-colors peer-checked:bg-[var(--color-accent-gold)] peer-focus-visible:ring-2"
+            style={{
+              background: showFavoritesOnly ? "var(--color-accent-gold)" : "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+            }}
+          />
+          <div
+            className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full transition-transform peer-checked:translate-x-5"
+            style={{ background: "var(--color-bg-canvas)" }}
+          />
+        </div>
+        <span
+          className="text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Mostrar Favoritos ({favoritesCount})
+        </span>
+      </label>
+
       {/* Exclude Caerleon toggle */}
       <label
         className="flex cursor-pointer items-center gap-3"

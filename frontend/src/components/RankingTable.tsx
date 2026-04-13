@@ -28,6 +28,7 @@ function SkeletonRow({ index }: { index: number }) {
   return (
     <tr key={index}>
       <td className="px-3 py-3"><div className="skeleton h-4 w-6" /></td>
+      <td className="px-1 py-3"><div className="skeleton mx-auto h-4 w-4" /></td>
       <td className="px-3 py-3"><div className="skeleton h-4 w-32" /></td>
       <td className="px-3 py-3"><div className="skeleton h-4 w-8" /></td>
       <td className="hidden px-3 py-3 md:table-cell"><div className="skeleton h-4 w-8" /></td>
@@ -50,6 +51,8 @@ interface RankingTableProps {
   onRetry: () => void;
   offset: number;
   limit: number;
+  favorites: Set<string>;
+  onToggleFavorite: (id: string) => void;
 }
 
 const SORTABLE_COLUMNS: { field: SortField; label: string }[] = [
@@ -68,6 +71,8 @@ export default function RankingTable({
   onRetry,
   offset,
   limit,
+  favorites,
+  onToggleFavorite,
 }: RankingTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -183,6 +188,9 @@ export default function RankingTable({
               <th scope="col" className="sticky left-0 z-10 px-3 py-3 text-left text-xs font-semibold" style={{ background: "var(--color-bg-panel)", color: "var(--color-text-secondary)" }}>
                 #
               </th>
+              <th scope="col" className="px-1 py-3 text-center text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
+                ★
+              </th>
               <th scope="col" className="px-3 py-3 text-left text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
                 Item
               </th>
@@ -226,6 +234,8 @@ export default function RankingTable({
                     item={item}
                     rank={offset + idx + 1}
                     onClick={() => navigateToItem(item.product_id)}
+                    isFavorite={favorites.has(item.product_id)}
+                    onToggleFavorite={() => onToggleFavorite(item.product_id)}
                   />
                 ))}
           </tbody>
@@ -296,10 +306,14 @@ function ItemRow({
   item,
   rank,
   onClick,
+  isFavorite,
+  onToggleFavorite,
 }: {
   item: ScoredItem;
   rank: number;
   onClick: () => void;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
 }) {
   const isPositive = item.return_rate_pct > 0.5;
   const isNegative = item.return_rate_pct < -0.5;
@@ -334,6 +348,19 @@ function ItemRow({
         style={{ background: "inherit", color: "var(--color-text-muted)" }}
       >
         {rank}
+      </td>
+
+      {/* Favorite */}
+      <td className="px-1 py-3 text-center">
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.stopPropagation(); }}
+          className="text-lg leading-none transition-transform hover:scale-125"
+          style={{ color: isFavorite ? "var(--color-accent-gold)" : "var(--color-text-muted)" }}
+          aria-label={isFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+        >
+          {isFavorite ? "★" : "☆"}
+        </button>
       </td>
 
       {/* Item name */}
