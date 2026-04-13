@@ -16,6 +16,9 @@ export default function CityComparisonTable({ cities, bestCity }: CityComparison
     return b.return_rate_pct - a.return_rate_pct;
   });
 
+  const withData = sorted.filter((c) => c.return_rate_pct !== null);
+  const withoutData = sorted.filter((c) => c.return_rate_pct === null);
+
   const maxProfit = Math.max(
     ...sorted
       .map((c) => c.profit_absolute)
@@ -24,143 +27,168 @@ export default function CityComparisonTable({ cities, bestCity }: CityComparison
   );
 
   return (
-    <div
-      className="overflow-x-auto rounded-lg border"
-      style={{
-        background: "var(--color-bg-elevated)",
-        borderColor: "var(--color-border-default)",
-      }}
-    >
-      <table className="w-full text-sm" style={{ color: "var(--color-text-primary)" }}>
-        <thead>
-          <tr
-            style={{
-              background: "var(--color-bg-panel)",
-              borderBottom: "1px solid var(--color-border-default)",
-            }}
-          >
-            <th scope="col" className="px-4 py-3 text-left text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-              Cidade
-            </th>
-            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-              Retorno %
-            </th>
-            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-              Preço de Venda
-            </th>
-            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-              Lucro
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((city) => {
-            const isBest = city.city === bestCity;
-            const hasData = city.return_rate_pct !== null;
-            const isPositive = hasData && city.return_rate_pct! > 0.5;
-            const isNegative = hasData && city.return_rate_pct! < -0.5;
-            const profitBarWidth =
-              city.profit_absolute !== null && city.profit_absolute > 0
-                ? (city.profit_absolute / maxProfit) * 100
-                : 0;
+    <div className="space-y-3">
+      {/* City cards grid */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {withData.map((city, idx) => {
+          const isBest = city.city === bestCity;
+          const isPositive = city.return_rate_pct! > 0.5;
+          const isNegative = city.return_rate_pct! < -0.5;
+          const profitBarWidth =
+            city.profit_absolute !== null && city.profit_absolute > 0
+              ? (city.profit_absolute / maxProfit) * 100
+              : 0;
 
-            return (
-              <tr
-                key={city.city}
+          return (
+            <div
+              key={city.city}
+              className="relative overflow-hidden rounded-lg border"
+              style={{
+                background: "var(--color-bg-elevated)",
+                borderColor: isBest
+                  ? "var(--color-accent-gold)"
+                  : "var(--color-border-default)",
+                borderWidth: isBest ? "2px" : "1px",
+              }}
+            >
+              {/* Rank + City header */}
+              <div
+                className="flex items-center justify-between px-4 py-2.5"
                 style={{
-                  borderBottom: "1px solid var(--color-border-muted)",
-                  borderLeft: isBest
-                    ? "3px solid var(--color-accent-gold)"
-                    : "3px solid transparent",
-                  background: isBest ? "var(--color-bg-panel)" : undefined,
+                  background: isBest ? "var(--color-accent-gold)" : "var(--color-bg-panel)",
+                  borderBottom: `1px solid ${isBest ? "var(--color-accent-gold)" : "var(--color-border-default)"}`,
                 }}
               >
-                <td className="px-4 py-3 text-sm font-medium">
-                  <span className="flex items-center gap-2">
-                    {city.city}
-                    {isBest && (
-                      <span
-                        className="text-xs"
-                        style={{ color: "var(--color-accent-gold)" }}
-                        aria-label="Melhor cidade"
-                      >
-                        ⭐
-                      </span>
-                    )}
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{
+                      background: isBest ? "rgba(0,0,0,0.25)" : "var(--color-bg-elevated)",
+                      color: isBest ? "#fff" : "var(--color-text-muted)",
+                    }}
+                  >
+                    {idx + 1}
                   </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {hasData ? (
+                  <span
+                    className="text-sm font-semibold"
+                    style={{ color: isBest ? "#1a1a1a" : "var(--color-text-primary)" }}
+                  >
+                    {city.city}
+                  </span>
+                </div>
+                {isBest && (
+                  <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#1a1a1a" }}>
+                    Melhor
+                  </span>
+                )}
+              </div>
+
+              {/* Metrics */}
+              <div className="space-y-3 px-4 py-3">
+                {/* Return rate */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    Retorno
+                  </span>
+                  <span
+                    className="tabular-nums inline-block rounded px-2 py-0.5 text-sm font-bold"
+                    style={{
+                      fontFamily: "var(--font-plex-mono), monospace",
+                      background: isPositive
+                        ? "var(--color-profit-soft)"
+                        : isNegative
+                          ? "var(--color-loss-soft)"
+                          : "var(--color-info-soft)",
+                      color: isPositive
+                        ? "var(--color-profit-strong)"
+                        : isNegative
+                          ? "var(--color-loss-strong)"
+                          : "var(--color-info)",
+                    }}
+                  >
+                    {formatPct(city.return_rate_pct!)}
+                  </span>
+                </div>
+
+                {/* Sell price */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    Preço de Venda
+                  </span>
+                  <span
+                    className="tabular-nums text-sm font-medium"
+                    style={{
+                      fontFamily: "var(--font-plex-mono), monospace",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {city.sell_price !== null ? formatSilver(city.sell_price) : "—"}
+                  </span>
+                </div>
+
+                {/* Profit with bar */}
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                      Lucro
+                    </span>
                     <span
-                      className="tabular-nums inline-block rounded px-2 py-0.5 text-sm font-semibold"
+                      className="tabular-nums text-sm font-bold"
                       style={{
                         fontFamily: "var(--font-plex-mono), monospace",
-                        background: isPositive
-                          ? "var(--color-profit-soft)"
-                          : isNegative
-                            ? "var(--color-loss-soft)"
-                            : "var(--color-info-soft)",
-                        color: isPositive
-                          ? "var(--color-profit-strong)"
-                          : isNegative
-                            ? "var(--color-loss-strong)"
-                            : "var(--color-info)",
-                      }}
-                    >
-                      {formatPct(city.return_rate_pct!)}
-                    </span>
-                  ) : (
-                    <span style={{ color: "var(--color-text-muted)" }}>—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {city.sell_price !== null ? (
-                    <span
-                      className="tabular-nums text-sm font-medium"
-                      style={{
-                        fontFamily: "var(--font-plex-mono), monospace",
-                        color: "var(--color-text-primary)",
-                      }}
-                    >
-                      {formatSilver(city.sell_price)}
-                    </span>
-                  ) : (
-                    <span style={{ color: "var(--color-text-muted)" }}>—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {city.profit_absolute !== null ? (
-                    <div className="relative flex items-center justify-end">
-                      {profitBarWidth > 0 && (
-                        <div
-                          className="absolute inset-y-0 right-0 rounded-sm opacity-15"
-                          style={{
-                            width: `${profitBarWidth}%`,
-                            background: "var(--color-profit-strong)",
-                          }}
-                        />
-                      )}
-                      <span
-                        className="tabular-nums relative z-10 text-sm font-medium"
-                        style={{
-                          fontFamily: "var(--font-plex-mono), monospace",
-                          color: city.profit_absolute >= 0
+                        color:
+                          city.profit_absolute !== null && city.profit_absolute >= 0
                             ? "var(--color-profit-strong)"
                             : "var(--color-loss-strong)",
+                      }}
+                    >
+                      {city.profit_absolute !== null ? formatSilver(city.profit_absolute) : "—"}
+                    </span>
+                  </div>
+                  {profitBarWidth > 0 && (
+                    <div
+                      className="h-1 rounded-full"
+                      style={{ background: "var(--color-border-muted)" }}
+                    >
+                      <div
+                        className="h-1 rounded-full transition-all"
+                        style={{
+                          width: `${profitBarWidth}%`,
+                          background: "var(--color-profit-strong)",
                         }}
-                      >
-                        {formatSilver(city.profit_absolute)}
-                      </span>
+                      />
                     </div>
-                  ) : (
-                    <span style={{ color: "var(--color-text-muted)" }}>—</span>
                   )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Cities without data */}
+      {withoutData.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-lg px-4 py-2.5"
+          style={{ background: "var(--color-bg-panel)" }}
+        >
+          <span className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
+            Sem dados:
+          </span>
+          {withoutData.map((city) => (
+            <span
+              key={city.city}
+              className="rounded-md border px-2.5 py-1 text-xs"
+              style={{
+                borderColor: "var(--color-border-muted)",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              {city.city}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

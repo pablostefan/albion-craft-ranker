@@ -29,6 +29,7 @@ class ScoredItemSchema(BaseModel):
     bm_return_rate_pct: float | None = None
     daily_volume: float | None = None
     display_name: str = ""
+    silver_cost: int = 0
 
 
 class ItemsResponse(BaseModel):

@@ -21,30 +21,32 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_ITEMS_JSON = _PROJECT_ROOT / "data" / "items.json"
 
 
+async def _load_prices_once(state: AppState) -> None:
+    """Fetch prices from Albion API once and update state."""
+    from ..albion_client import AlbionAPIClient, PRD_CITY_LOCATIONS
+
+    client = AlbionAPIClient()
+    try:
+        all_item_ids = sorted({r.product_id for r in state.recipes})
+        for r in state.recipes:
+            for m in r.materials:
+                all_item_ids.append(m.item_id)
+        all_item_ids = sorted(set(all_item_ids))
+        prices = await asyncio.to_thread(
+            client.get_prices, all_item_ids, PRD_CITY_LOCATIONS, 1
+        )
+        state.prices = prices
+        state.cache.invalidate_all()
+        logger.info("Prices refreshed: %d entries", len(prices))
+    finally:
+        client.close()
+
+
 async def _refresh_prices(state: AppState, interval: float = 300.0) -> None:
     """Background task: refresh prices from Albion API every `interval` seconds."""
-    from ..albion_client import AlbionAPIClient
-
     while True:
         try:
-            client = AlbionAPIClient()
-            try:
-                all_item_ids = sorted({r.product_id for r in state.recipes})
-                for r in state.recipes:
-                    for m in r.materials:
-                        all_item_ids.append(m.item_id)
-                all_item_ids = sorted(set(all_item_ids))
-
-                from ..albion_client import PRD_CITY_LOCATIONS
-
-                prices = await asyncio.to_thread(
-                    client.get_prices, all_item_ids, PRD_CITY_LOCATIONS, 1
-                )
-                state.prices = prices
-                state.cache.invalidate_all()
-                logger.info("Prices refreshed: %d entries", len(prices))
-            finally:
-                client.close()
+            await _load_prices_once(state)
         except Exception:
             logger.exception("Failed to refresh prices")
         await asyncio.sleep(interval)
@@ -63,7 +65,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.build_recipe_index()
         logger.info("Loaded %d recipes from items.json", len(state.recipes))
 
-    # Fetch initial prices (lazy — don't block startup if API is slow)
+    # Eager initial price load before accepting requests
+    try:
+        await asyncio.wait_for(_load_prices_once(state), timeout=60.0)
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.warning("Initial price fetch failed (%s); starting with empty prices", exc)
+
+    # Background loop for periodic refresh
     refresh_task = asyncio.create_task(_refresh_prices(state, interval=300.0))
     try:
         yield
@@ -94,7 +102,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+        allow_origins=os.getenv(
+            "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+        ).split(","),
         allow_methods=["*"],
         allow_headers=["*"],
     )

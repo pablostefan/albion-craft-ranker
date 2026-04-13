@@ -97,6 +97,7 @@ def _parse_recipe_definition(
         materials=materials,
         focus_cost=_extract_focus_cost(recipe_data),
         amount_crafted=max(1, _as_int(recipe_data.get("@amountcrafted"), default=1)),
+        silver_cost=_as_int(recipe_data.get("@silver"), default=0),
     )
 
 

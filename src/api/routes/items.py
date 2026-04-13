@@ -63,7 +63,7 @@ def _scored_items(
         items.sort(key=lambda x: x.profit_per_focus, reverse=True)
     # default: return_rate_pct → already sorted by final_score which correlates
 
-    if use_cache:
+    if use_cache and items:
         state.cache.set(cache_key, items)
     return items
 
@@ -367,3 +367,12 @@ def _matches_tier(item: ScoredItem, tier: int, state: AppState) -> bool:
 
 def _matches_enchantment(item: ScoredItem, enchantment: int, state: AppState) -> bool:
     return any(r.enchantment == enchantment for r in state.recipes if r.product_id == item.product_id)
+
+
+@router.get("/status")
+def get_status(request: Request) -> dict:
+    state = _get_state(request)
+    return {
+        "recipes_loaded": len(state.recipes),
+        "prices_loaded": len(state.prices),
+    }

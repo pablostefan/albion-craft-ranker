@@ -19,6 +19,7 @@ class Recipe:
     materials: list[Material]
     focus_cost: int
     amount_crafted: int = 1
+    silver_cost: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,3 +106,4 @@ class ScoredItem:
     bm_profit: float | None = None
     bm_return_rate_pct: float | None = None
     display_name: str = ""
+    silver_cost: int = 0

@@ -210,6 +210,53 @@ class ParseItemsJsonTests(unittest.TestCase):
         self.assertEqual(recipes[0].product_id, "T2_POTION_HEAL")
         self.assertEqual(recipes[0].amount_crafted, 5)
 
+    def test_parse_items_json_reads_silver_cost_from_crafting_requirements(self) -> None:
+        payload = {
+            "items": {
+                "simpleitem": [
+                    {
+                        "@uniquename": "T5_WOOD",
+                        "@tier": "5",
+                        "@shopcategory": "resource",
+                        "craftingrequirements": {
+                            "@silver": "1250",
+                            "craftresource": {
+                                "@uniquename": "T4_WOOD",
+                                "@count": "1",
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+        path = self._write_items_json(payload)
+        recipes = parse_items_json(path)
+        self.assertEqual(len(recipes), 1)
+        self.assertEqual(recipes[0].silver_cost, 1250)
+
+    def test_parse_items_json_silver_cost_defaults_to_zero_when_absent(self) -> None:
+        payload = {
+            "items": {
+                "simpleitem": [
+                    {
+                        "@uniquename": "T4_WOOD",
+                        "@tier": "4",
+                        "@shopcategory": "resource",
+                        "craftingrequirements": {
+                            "craftresource": {
+                                "@uniquename": "T3_WOOD",
+                                "@count": "2",
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+        path = self._write_items_json(payload)
+        recipes = parse_items_json(path)
+        self.assertEqual(len(recipes), 1)
+        self.assertEqual(recipes[0].silver_cost, 0)
+
 
 @unittest.skipUnless(
     os.environ.get("ITEMS_JSON_PATH") and Path(os.environ.get("ITEMS_JSON_PATH", "")).exists(),

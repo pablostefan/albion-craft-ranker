@@ -361,11 +361,6 @@ def _find_best_city(
         except (KeyError, ValueError):
             continue
 
-        setup = eff_cost * config.setup_fee_rate
-        total_cost = eff_cost + setup
-        if total_cost <= 0:
-            continue
-
         if effective_sell_mode == "black_market":
             mp = price_idx.get((recipe.product_id, _BM_LOCATION))
             sell_price = mp.buy_price_max if mp is not None else 0.0
@@ -377,6 +372,11 @@ def _find_best_city(
             continue
 
         total_sell = sell_price * recipe.amount_crafted
+        setup = total_sell * config.setup_fee_rate if effective_sell_mode != "black_market" else 0.0
+        total_cost = eff_cost + setup + recipe.silver_cost
+        if total_cost <= 0:
+            continue
+
         sales_tax = total_sell * config.sales_tax_rate
         net_revenue = total_sell - sales_tax
         profit = net_revenue - total_cost
@@ -471,12 +471,12 @@ def rank_items_v2(
         except (KeyError, ValueError):
             continue
 
-        # ── 2. Setup fee (2.5% of craft cost) ────────────────────────────
-        setup_fee = effective_craft_cost * config.setup_fee_rate
-        total_cost = effective_craft_cost + setup_fee
+        # ── 2. Sell-side revenue & setup fee (2.5% of listed price; 0 on BM)
 
         # ── 3. Sell-side revenue ──────────────────────────────────────────
         sell_price: float = 0.0
+        setup_fee: float = 0.0
+        total_sell: float = 0.0
         sales_tax: float = 0.0
         net_revenue: float = 0.0
         freshness_hours: float = 0.0
@@ -493,25 +493,28 @@ def rank_items_v2(
             else:
                 sell_price = mp_sell.sell_price_min
                 total_sell = sell_price * recipe.amount_crafted
+                setup_fee = total_sell * config.setup_fee_rate
                 sales_tax = total_sell * config.sales_tax_rate
                 net_revenue = total_sell - sales_tax
                 freshness_hours = mp_sell.staleness_hours
-                volume = (volumes_map or {}).get(recipe.product_id) or max(mp_sell.buy_price_max, 0.0)
+                volume = (volumes_map or {}).get(recipe.product_id) or 0.0
 
         if sell_mode == "black_market":
             if mp_bm is None or mp_bm.buy_price_max <= 0:
                 continue  # no BM price → skip
             sell_price = mp_bm.buy_price_max
             total_sell = sell_price * recipe.amount_crafted
+            setup_fee = 0.0
             sales_tax = total_sell * config.sales_tax_rate
             net_revenue = total_sell - sales_tax
             freshness_hours = mp_bm.staleness_hours
-            volume = (volumes_map or {}).get(recipe.product_id) or sell_price
+            volume = (volumes_map or {}).get(recipe.product_id) or 0.0
 
         # For comparison mode, skip entirely if neither source has revenue
         if sell_mode == "comparison" and net_revenue <= 0:
             continue
 
+        total_cost = effective_craft_cost + setup_fee + recipe.silver_cost
         profit = net_revenue - total_cost
         if profit < config.min_profit:
             continue
@@ -537,7 +540,7 @@ def rank_items_v2(
                 eff_no_focus = effective_craft_cost
                 eff_with_focus = effective_craft_cost
             cost_saving = eff_no_focus - eff_with_focus
-            profit_per_focus = (cost_saving * (1.0 + config.setup_fee_rate)) / recipe.focus_cost
+            profit_per_focus = cost_saving / recipe.focus_cost
         else:
             profit_per_focus = 0.0
 
@@ -556,9 +559,10 @@ def rank_items_v2(
             bm_tax = bm_total_sell * config.sales_tax_rate
             bm_sell_price = bm_sell
             bm_net_revenue = bm_total_sell - bm_tax
-            bm_profit = bm_net_revenue - total_cost
+            bm_total_cost = effective_craft_cost + recipe.silver_cost
+            bm_profit = bm_net_revenue - bm_total_cost
             bm_return_rate_pct = (
-                bm_profit / total_cost * 100.0 if total_cost > 0 else 0.0
+                bm_profit / bm_total_cost * 100.0 if bm_total_cost > 0 else 0.0
             )
 
         # ── 7. Best city (cross-city optimization) ────────────────────────
@@ -599,6 +603,7 @@ def rank_items_v2(
                 bm_profit=bm_profit,
                 bm_return_rate_pct=bm_return_rate_pct,
                 display_name=format_item_id(recipe.product_id),
+                silver_cost=recipe.silver_cost,
             )
         )
 

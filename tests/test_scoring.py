@@ -46,6 +46,7 @@ def _recipe(
     materials: list[Material] | None = None,
     focus_cost: int = 100,
     amount_crafted: int = 1,
+    silver_cost: int = 0,
 ) -> Recipe:
     if materials is None:
         materials = [Material(item_id="T4_CLOTH", quantity=16, is_artifact_component=False)]
@@ -57,6 +58,7 @@ def _recipe(
         materials=materials,
         focus_cost=focus_cost,
         amount_crafted=amount_crafted,
+        silver_cost=silver_cost,
     )
 
 
@@ -129,7 +131,7 @@ class TestRankItemsV2Basic(unittest.TestCase):
 
 
 class TestRankItemsV2Taxes(unittest.TestCase):
-    def test_setup_fee_is_2p5_percent_of_effective_craft_cost(self) -> None:
+    def test_setup_fee_is_2p5_percent_of_listed_price(self) -> None:
         recipe = _recipe("PROD", "cloth_armor", materials=[Material("MAT", 10, False)])
         prices = [
             _mp("MAT", "Lymhurst", sell_min=1000.0),
@@ -141,7 +143,8 @@ class TestRankItemsV2Taxes(unittest.TestCase):
         )
         self.assertEqual(len(results), 1)
         item = results[0]
-        self.assertAlmostEqual(item.setup_fee, item.effective_craft_cost * 0.025, places=4)
+        total_sell = item.sell_price * 1  # amount_crafted=1
+        self.assertAlmostEqual(item.setup_fee, total_sell * 0.025, places=4)
 
     def test_sales_tax_is_4_percent_premium(self) -> None:
         recipe = _recipe("PROD", "cloth_armor", materials=[Material("MAT", 10, False)])
@@ -280,8 +283,9 @@ class TestRankItemsV2SellModes(unittest.TestCase):
             config=config, craft_city="Brecilien", sell_mode="comparison",
         )
         item = results[0]
-        total_cost = item.effective_craft_cost + item.setup_fee
-        expected_bm_rr = item.bm_profit / total_cost * 100.0  # type: ignore[operator]
+        # BM comparison uses cost without setup fee
+        bm_total_cost = item.effective_craft_cost + item.silver_cost
+        expected_bm_rr = item.bm_profit / bm_total_cost * 100.0  # type: ignore[operator]
         self.assertAlmostEqual(item.bm_return_rate_pct, expected_bm_rr, places=6)  # type: ignore[arg-type]
 
     def test_invalid_sell_mode_raises_value_error(self) -> None:
@@ -474,8 +478,7 @@ class TestRankItemsV2FocusCost(unittest.TestCase):
             recipe.materials, unit_prices, category="cloth_armor",
             city="Lymhurst", use_focus=True,
         )
-        setup_rate = 0.025
-        cost_delta = (eff_no_focus - eff_with_focus) * (1.0 + setup_rate)
+        cost_delta = eff_no_focus - eff_with_focus
         expected_ppf = cost_delta / 200.0
 
         self.assertAlmostEqual(item.profit_per_focus, expected_ppf, places=6)
@@ -714,8 +717,8 @@ class TestRankItemsV2VolumesMap(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].volume_score, 9999.0)
 
-    def test_volumes_map_none_falls_back_to_buy_price_max(self) -> None:
-        """Without volumes_map, volume_score is set from buy_price_max."""
+    def test_volumes_map_none_falls_back_to_zero(self) -> None:
+        """Without volumes_map, volume_score falls back to 0.0."""
         recipe = _recipe("T4_CLOTH_ARMOR")
         prices = [
             _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
@@ -730,7 +733,54 @@ class TestRankItemsV2VolumesMap(unittest.TestCase):
             volumes_map=None,
         )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].volume_score, 20000.0)
+        self.assertEqual(results[0].volume_score, 0.0)
+
+
+class TestRankItemsV2SilverCost(unittest.TestCase):
+    def test_silver_cost_reduces_profit_by_exact_amount(self) -> None:
+        """silver_cost is added to total_cost, reducing profit_absolute by exactly that amount."""
+        base_recipe = _recipe("T4_CLOTH_ARMOR", silver_cost=0)
+        silver_recipe = _recipe("T4_CLOTH_ARMOR", silver_cost=1000)
+        prices = [
+            _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
+            _mp("T4_CLOTH_ARMOR", "Lymhurst", sell_min=30000.0, buy_max=25000.0),
+        ]
+        r_base = rank_items_v2(
+            recipes=[base_recipe],
+            prices=prices,
+            city_bonuses=None,
+            config=_cfg(),
+            craft_city="Lymhurst",
+        )
+        r_silver = rank_items_v2(
+            recipes=[silver_recipe],
+            prices=prices,
+            city_bonuses=None,
+            config=_cfg(),
+            craft_city="Lymhurst",
+        )
+        self.assertEqual(len(r_base), 1)
+        self.assertEqual(len(r_silver), 1)
+        self.assertAlmostEqual(
+            r_base[0].profit_absolute - r_silver[0].profit_absolute,
+            1000.0,
+            places=4,
+        )
+        self.assertEqual(r_silver[0].silver_cost, 1000)
+
+    def test_silver_cost_zero_does_not_change_profit(self) -> None:
+        """silver_cost=0 (default) produces the same profit as a recipe with no silver field."""
+        recipe_no_silver = _recipe("T4_CLOTH_ARMOR")
+        recipe_zero_silver = _recipe("T4_CLOTH_ARMOR", silver_cost=0)
+        prices = [
+            _mp("T4_CLOTH", "Lymhurst", sell_min=1000.0),
+            _mp("T4_CLOTH_ARMOR", "Lymhurst", sell_min=25000.0, buy_max=20000.0),
+        ]
+        r1 = rank_items_v2([recipe_no_silver], prices, None, _cfg(), craft_city="Lymhurst")
+        r2 = rank_items_v2([recipe_zero_silver], prices, None, _cfg(), craft_city="Lymhurst")
+        self.assertEqual(len(r1), 1)
+        self.assertEqual(len(r2), 1)
+        self.assertAlmostEqual(r1[0].profit_absolute, r2[0].profit_absolute, places=4)
 
 
 if __name__ == "__main__":

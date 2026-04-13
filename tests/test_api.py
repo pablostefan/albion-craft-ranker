@@ -492,6 +492,40 @@ class TestCORS(unittest.TestCase):
         self.assertIn("access-control-allow-origin", resp.headers)
         self.assertEqual(resp.headers["access-control-allow-origin"], "http://localhost:3000")
 
+    def test_cors_allows_127_0_0_1_3000_by_default(self) -> None:
+        client = _make_client()
+        resp = client.options(
+            "/items",
+            headers={
+                "Origin": "http://127.0.0.1:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertIn("access-control-allow-origin", resp.headers)
+        self.assertEqual(resp.headers["access-control-allow-origin"], "http://127.0.0.1:3000")
+
+    @patch.dict("os.environ", {"CORS_ORIGINS": "http://example.com"}, clear=False)
+    def test_cors_origins_env_override_is_respected(self) -> None:
+        client = _make_client()
+
+        allowed = client.options(
+            "/items",
+            headers={
+                "Origin": "http://example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(allowed.headers.get("access-control-allow-origin"), "http://example.com")
+
+        blocked = client.options(
+            "/items",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertNotEqual(blocked.headers.get("access-control-allow-origin"), "http://localhost:3000")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Name search (?q=)
