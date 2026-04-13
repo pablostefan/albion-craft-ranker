@@ -6,7 +6,6 @@ import type { MarketMode } from "@/lib/types";
 const MODES: { value: MarketMode; label: string }[] = [
   { value: "marketplace", label: "Mercado" },
   { value: "black_market", label: "Mercado Negro" },
-  { value: "comparison", label: "Comparação" },
 ];
 
 interface BlackMarketToggleProps {
@@ -70,7 +69,7 @@ export default function BlackMarketToggle({ value, onChange }: BlackMarketToggle
                 ? "var(--color-accent-gold)"
                 : "var(--color-text-muted)",
               borderRight:
-                mode.value !== "comparison"
+                mode.value !== "black_market"
                   ? "1px solid var(--color-border-default)"
                   : undefined,
             }}

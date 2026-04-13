@@ -87,7 +87,7 @@ export type SortField =
 
 export type SortOrder = "asc" | "desc";
 
-export type MarketMode = "marketplace" | "black_market" | "comparison";
+export type MarketMode = "marketplace" | "black_market";
 
 export interface ItemsQueryParams {
   city?: string;

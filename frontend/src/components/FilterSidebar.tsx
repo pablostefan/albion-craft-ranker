@@ -39,7 +39,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const TIERS = [4, 5, 6, 7, 8] as const;
-const ENCHANTMENTS = [0, 1, 2, 3] as const;
+const ENCHANTMENTS = [0, 1, 2, 3, 4] as const;
 
 const CITIES = [
   "Bridgewatch",
@@ -107,7 +107,7 @@ export function ActiveFilterChips({
     chips.push({
       key: "market",
       label: "Mercado",
-      value: filters.market === "black_market" ? "Mercado Negro" : "Comparação",
+      value: "Mercado Negro",
     });
   }
   if (filters.category) chips.push({ key: "category", label: "Categoria", value: CATEGORY_LABELS[filters.category] ?? filters.category });

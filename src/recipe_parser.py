@@ -147,7 +147,7 @@ def _parse_materials(recipe_data: dict[str, Any]) -> list[Material]:
             Material(
                 item_id=item_id,
                 quantity=_as_int(resource.get("@count")),
-                is_artifact_component=str(resource.get("@maxreturnamount", "")).strip() == "0",
+                is_artifact_component="_ARTEFACT_" in item_id.upper(),
             )
         )
 
