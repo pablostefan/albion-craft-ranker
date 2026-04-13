@@ -46,6 +46,9 @@ export default function CityComparisonTable({ cities, bestCity }: CityComparison
               Retorno %
             </th>
             <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
+              Preço de Venda
+            </th>
+            <th scope="col" className="px-4 py-3 text-right text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
               Lucro
             </th>
           </tr>
@@ -105,6 +108,21 @@ export default function CityComparisonTable({ cities, bestCity }: CityComparison
                       }}
                     >
                       {formatPct(city.return_rate_pct!)}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--color-text-muted)" }}>—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {city.sell_price !== null ? (
+                    <span
+                      className="tabular-nums text-sm font-medium"
+                      style={{
+                        fontFamily: "var(--font-plex-mono), monospace",
+                        color: "var(--color-text-primary)",
+                      }}
+                    >
+                      {formatSilver(city.sell_price)}
                     </span>
                   ) : (
                     <span style={{ color: "var(--color-text-muted)" }}>—</span>

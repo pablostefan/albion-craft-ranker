@@ -20,7 +20,7 @@ from ..schemas import (
 
 router = APIRouter(prefix="/items", tags=["items"])
 
-VALID_SORT_FIELDS = {"return_rate_pct", "profit", "profit_per_focus", "liquidity"}
+VALID_SORT_FIELDS = {"final_score", "return_rate_pct", "profit", "profit_per_focus", "liquidity"}
 VALID_MARKETS = {"marketplace", "black_market", "comparison"}
 
 
@@ -29,13 +29,13 @@ def _get_state(request: Request) -> AppState:
 
 
 def _scored_items(
-    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None, exclude_cities: frozenset[str] = frozenset(),
+    state: AppState, city: str, market: str, sort_by: str, *, sell_city: str | None = None, config_override: object | None = None, exclude_cities: frozenset[str] = frozenset(), use_focus: bool = False,
 ) -> list[ScoredItem]:
     use_cache = config_override is None
     cfg = config_override if config_override is not None else state.config
 
     if use_cache:
-        cache_key = (city, market, sort_by, sell_city, exclude_cities)
+        cache_key = (city, market, sort_by, sell_city, exclude_cities, use_focus)
         cached = state.cache.get(cache_key)
         if cached is not None:
             return cached
@@ -49,10 +49,13 @@ def _scored_items(
         sell_mode=market,
         sell_city=sell_city,
         exclude_cities=exclude_cities,
+        use_focus=use_focus,
     )
 
-    # Sort
-    if sort_by == "profit":
+    # rank_items_v2 already returns items sorted by final_score descending.
+    if sort_by == "final_score":
+        pass
+    elif sort_by == "profit":
         items.sort(key=lambda x: x.profit_absolute, reverse=True)
     elif sort_by == "profit_per_focus":
         items.sort(key=lambda x: x.profit_per_focus, reverse=True)
@@ -76,7 +79,7 @@ def list_items(
     market: str = Query("marketplace"),
     sell_city: str | None = Query(None, description="City where items are sold (for cross-city arbitrage)"),
     exclude_cities: str | None = Query(None, description="Comma-separated cities to exclude from best-city calculation"),
-    sort_by: str = Query("return_rate_pct"),
+    sort_by: str = Query("liquidity"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -85,6 +88,7 @@ def list_items(
     w_focus: float | None = Query(None, ge=0, le=1),
     w_liquidity: float | None = Query(None, ge=0, le=1),
     w_freshness: float | None = Query(None, ge=0, le=1),
+    use_focus: bool = Query(False, description="Whether to include focus cost in profit calculations"),
 ) -> ItemsResponse:
     state = _get_state(request)
 
@@ -108,7 +112,7 @@ def list_items(
     if sort_by not in VALID_SORT_FIELDS:
         raise HTTPException(400, f"Invalid sort_by: {sort_by}")
 
-    items = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override, exclude_cities=excluded)
+    items = _scored_items(state, city, market, sort_by, sell_city=sell_city, config_override=config_override, exclude_cities=excluded, use_focus=use_focus)
 
     # Apply filters
     filtered = items
@@ -125,6 +129,8 @@ def list_items(
     descending = order == "desc"
     if sort_by == "profit":
         filtered.sort(key=lambda x: x.profit_absolute, reverse=descending)
+    elif sort_by == "final_score":
+        filtered.sort(key=lambda x: x.final_score, reverse=descending)
     elif sort_by == "profit_per_focus":
         filtered.sort(key=lambda x: x.profit_per_focus, reverse=descending)
     elif sort_by == "liquidity":
@@ -158,6 +164,7 @@ def get_item(
     market: str = Query("marketplace"),
     sell_city: str | None = Query(None),
     exclude_cities: str | None = Query(None, description="Comma-separated cities to exclude"),
+    use_focus: bool = Query(False, description="Whether to include focus cost in profit calculations"),
 ) -> ItemDetailResponse:
     state = _get_state(request)
 
@@ -167,7 +174,7 @@ def get_item(
     excluded = frozenset(c.strip() for c in exclude_cities.split(",") if c.strip()) if exclude_cities else frozenset()
 
     # Score all items for the requested city/market
-    items = _scored_items(state, city, market, "return_rate_pct", sell_city=sell_city, exclude_cities=excluded)
+    items = _scored_items(state, city, market, "return_rate_pct", sell_city=sell_city, exclude_cities=excluded, use_focus=use_focus)
     target = next((i for i in items if i.product_id == item_id), None)
     if target is None:
         raise HTTPException(404, f"Item not found: {item_id}")
@@ -206,6 +213,7 @@ def get_item(
             sell_mode=market,
             sell_city=sell_city,
             exclude_cities=excluded,
+            use_focus=use_focus,
         )
         match = next((i for i in city_items if i.product_id == item_id), None)
         city_comparison.append(
@@ -213,6 +221,7 @@ def get_item(
                 city=comp_city,
                 return_rate_pct=match.return_rate_pct if match else None,
                 profit_absolute=match.profit_absolute if match else None,
+                sell_price=match.sell_price if match else None,
             )
         )
 

@@ -26,6 +26,7 @@ function useFilterValues(searchParams: URLSearchParams): FilterValues {
     w_liquidity: searchParams.get("w_liquidity") ?? "",
     w_freshness: searchParams.get("w_freshness") ?? "",
     excludeCaerleon: searchParams.get("exclude_caerleon") ?? "true",
+    useFocus: searchParams.get("use_focus") ?? "false",
   };
 }
 
@@ -39,6 +40,7 @@ function countActiveFilters(f: FilterValues): number {
   if (f.quality) n++;
   if (f.minProfit) n++;
   if (f.excludeCaerleon !== "true") n++;
+  if (f.useFocus === "true") n++;
   return n;
 }
 
@@ -46,7 +48,7 @@ function RankingDashboard() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const sortBy = (searchParams.get("sort_by") as SortField) || "return_rate_pct";
+  const sortBy = (searchParams.get("sort_by") as SortField) || "liquidity";
   const order = (searchParams.get("order") as SortOrder) || "desc";
   const offset = Number(searchParams.get("offset") || "0");
 
@@ -111,6 +113,7 @@ function RankingDashboard() {
         w_liquidity: filters.w_liquidity ? Number(filters.w_liquidity) : undefined,
         w_freshness: filters.w_freshness ? Number(filters.w_freshness) : undefined,
         exclude_cities: filters.excludeCaerleon === "true" ? "Caerleon" : undefined,
+        use_focus: filters.useFocus === "true" ? true : undefined,
       });
       setItems(res.items);
       setTotal(res.total);
@@ -125,7 +128,7 @@ function RankingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_liquidity, filters.w_freshness, filters.excludeCaerleon]);
+  }, [sortBy, order, offset, filters.market, filters.category, filters.tier, filters.enchantment, filters.city, filters.quality, filters.minProfit, filters.w_profit, filters.w_focus, filters.w_liquidity, filters.w_freshness, filters.excludeCaerleon, filters.useFocus]);
 
   useEffect(() => {
     load();

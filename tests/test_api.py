@@ -184,6 +184,21 @@ class TestListItems(unittest.TestCase):
         vals = [i["profit_per_focus"] for i in body["items"]]
         self.assertEqual(vals, sorted(vals, reverse=True))
 
+    def test_default_sort_uses_liquidity_desc(self) -> None:
+        resp = self.client.get("/items")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        values = [i["liquidity_score"] for i in body["items"]]
+        self.assertEqual(body["filters_applied"]["sort_by"], "liquidity")
+        self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_sort_by_final_score(self) -> None:
+        resp = self.client.get("/items", params={"sort_by": "final_score"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        scores = [i["final_score"] for i in body["items"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
     def test_pagination_limit_offset(self) -> None:
         resp_all = self.client.get("/items", params={"limit": 100})
         total = resp_all.json()["total"]

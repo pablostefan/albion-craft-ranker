@@ -46,6 +46,7 @@ class CityComparison(BaseModel):
     city: str
     return_rate_pct: float | None = None
     profit_absolute: float | None = None
+    sell_price: float | None = None
 
 
 class ItemDetailResponse(BaseModel):

@@ -83,6 +83,7 @@ export interface FilterValues {
   w_liquidity: string;
   w_freshness: string;
   excludeCaerleon: string;
+  useFocus: string;
 }
 
 /* ── Active Chip ── */
@@ -119,6 +120,7 @@ export function ActiveFilterChips({
   }
   if (filters.minProfit) chips.push({ key: "min_profit", label: "Lucro Mín.", value: `${filters.minProfit}s` });
   if (filters.excludeCaerleon !== "true") chips.push({ key: "exclude_caerleon", label: "Caerleon", value: "Incluído" });
+  if (filters.useFocus === "true") chips.push({ key: "use_focus", label: "Foco", value: "Ativado" });
 
   if (chips.length === 0) return null;
 
@@ -414,6 +416,41 @@ export default function FilterSidebar({
           style={{ color: "var(--color-text-secondary)" }}
         >
           Excluir Caerleon
+        </span>
+      </label>
+
+      {/* Use Focus toggle */}
+      <label
+        className="flex cursor-pointer items-center gap-3"
+        htmlFor="toggle-use-focus"
+      >
+        <div className="relative">
+          <input
+            id="toggle-use-focus"
+            type="checkbox"
+            checked={filters.useFocus === "true"}
+            onChange={(e) =>
+              onFilterChange("use_focus", e.target.checked ? "true" : "false")
+            }
+            className="peer sr-only"
+          />
+          <div
+            className="h-6 w-11 rounded-full transition-colors peer-checked:bg-[var(--color-accent-gold)] peer-focus-visible:ring-2"
+            style={{
+              background: filters.useFocus === "true" ? "var(--color-accent-gold)" : "var(--color-bg-overlay)",
+              border: "1px solid var(--color-border-default)",
+            }}
+          />
+          <div
+            className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full transition-transform peer-checked:translate-x-5"
+            style={{ background: "var(--color-bg-canvas)" }}
+          />
+        </div>
+        <span
+          className="text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Usar Foco
         </span>
       </label>
 

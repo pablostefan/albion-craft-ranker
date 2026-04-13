@@ -53,6 +53,7 @@ interface RankingTableProps {
 }
 
 const SORTABLE_COLUMNS: { field: SortField; label: string }[] = [
+  { field: "final_score", label: "Lucro + Liquidez" },
   { field: "return_rate_pct", label: "Retorno %" },
   { field: "profit", label: "Lucro" },
   { field: "profit_per_focus", label: "Lucro/Foco" },
@@ -71,7 +72,7 @@ export default function RankingTable({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const currentSort = (searchParams.get("sort_by") as SortField) || "return_rate_pct";
+  const currentSort = (searchParams.get("sort_by") as SortField) || "liquidity";
   const currentOrder = (searchParams.get("order") as SortOrder) || "desc";
 
   const updateParams = useCallback(
@@ -361,7 +362,29 @@ function ItemRow({
         {extractEnchantment(item.product_id)}
       </td>
 
-      {/* Return rate — HERO metric */}
+      {/* Final score (Lucro + Liquidez) */}
+      <td className="px-3 py-3">
+        <span
+          className="tabular-nums inline-block rounded px-2 py-0.5 text-base font-bold md:text-lg"
+          style={{
+            fontFamily: "var(--font-plex-mono), IBM Plex Mono, Menlo, monospace",
+            background: isPositive
+              ? "var(--color-profit-soft)"
+              : isNegative
+                ? "var(--color-loss-soft)"
+                : "var(--color-info-soft)",
+            color: isPositive
+              ? "var(--color-profit-strong)"
+              : isNegative
+                ? "var(--color-loss-strong)"
+                : "var(--color-info)",
+          }}
+        >
+          {(item.final_score * 100).toFixed(1)}
+        </span>
+      </td>
+
+      {/* Return rate */}
       <td className="px-3 py-3">
         <span
           className="tabular-nums inline-block rounded px-2 py-0.5 text-base font-bold md:text-lg"

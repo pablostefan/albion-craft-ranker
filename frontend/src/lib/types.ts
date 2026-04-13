@@ -42,6 +42,7 @@ export interface CityComparison {
   city: string;
   return_rate_pct: number | null;
   profit_absolute: number | null;
+  sell_price: number | null;
 }
 
 export interface ItemDetailResponse {
@@ -78,6 +79,7 @@ export interface ConfigResponse {
 }
 
 export type SortField =
+  | "final_score"
   | "return_rate_pct"
   | "profit"
   | "profit_per_focus"
@@ -105,4 +107,5 @@ export interface ItemsQueryParams {
   w_liquidity?: number;
   w_freshness?: number;
   exclude_cities?: string;
+  use_focus?: boolean;
 }
