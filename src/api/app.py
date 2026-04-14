@@ -110,4 +110,10 @@ def create_app(state: AppState | None = None) -> FastAPI:
     )
 
     app.include_router(api_router)
+
+    @app.get("/health", tags=["health"])
+    async def health_check() -> dict:
+        """Liveness probe for Render health check."""
+        return {"status": "ok"}
+
     return app
