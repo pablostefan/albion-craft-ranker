@@ -32,9 +32,7 @@ async def _load_prices_once(state: AppState) -> None:
             for m in r.materials:
                 all_item_ids.append(m.item_id)
         all_item_ids = sorted(set(all_item_ids))
-        prices = await asyncio.to_thread(
-            client.get_prices, all_item_ids, PRD_CITY_LOCATIONS, 1
-        )
+        prices = await client.get_prices_async(all_item_ids, PRD_CITY_LOCATIONS, 1)
         state.prices = prices
         state.cache.invalidate_all()
         logger.info("Prices refreshed: %d entries", len(prices))
@@ -65,13 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.build_recipe_index()
         logger.info("Loaded %d recipes from items.json", len(state.recipes))
 
-    # Eager initial price load before accepting requests
-    try:
-        await asyncio.wait_for(_load_prices_once(state), timeout=60.0)
-    except (asyncio.TimeoutError, Exception) as exc:
-        logger.warning("Initial price fetch failed (%s); starting with empty prices", exc)
-
-    # Background loop for periodic refresh
+    # Background loop: fetches prices immediately on first run, then every 300s.
+    # Uses async concurrent requests (~20-30s for ~9k IDs) instead of sequential (~200s).
     refresh_task = asyncio.create_task(_refresh_prices(state, interval=300.0))
     try:
         yield

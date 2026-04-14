@@ -1,7 +1,6 @@
 """Manual price refresh endpoint."""
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, Request
@@ -31,9 +30,7 @@ async def refresh_prices(request: Request) -> RefreshResponse:
                 all_item_ids.append(m.item_id)
         all_item_ids = sorted(set(all_item_ids))
 
-        prices = await asyncio.to_thread(
-            client.get_prices, all_item_ids, PRD_CITY_LOCATIONS, 1
-        )
+        prices = await client.get_prices_async(all_item_ids, PRD_CITY_LOCATIONS, 1)
         state.prices = prices
         state.cache.invalidate_all()
         logger.info("Manual refresh: %d price entries", len(prices))

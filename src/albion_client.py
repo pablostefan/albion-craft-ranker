@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 import time
 from dataclasses import dataclass, field
@@ -235,6 +236,77 @@ class AlbionAPIClient:
         locations: Sequence[str] | None = None,
     ) -> List[MarketPrice]:
         return self.get_prices(item_ids, locations or PRD_CITY_LOCATIONS, quality)
+
+    async def get_prices_async(
+        self,
+        item_ids: Iterable[str],
+        locations: Iterable[str],
+        quality: int,
+        max_concurrent: int = 5,
+    ) -> List[MarketPrice]:
+        """Async concurrent version of get_prices.
+
+        Sends up to ``max_concurrent`` batch requests in parallel, which
+        reduces total fetch time from O(batches) to O(batches/concurrency).
+        """
+        unique_ids = self._unique_values(item_ids)
+        locations_str = ",".join(self._unique_values(locations))
+        if not unique_ids or not locations_str:
+            return []
+
+        batch_size = 50
+        batches = [
+            unique_ids[i : i + batch_size] for i in range(0, len(unique_ids), batch_size)
+        ]
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def fetch_batch(chunk: List[str]) -> List[MarketPrice]:
+            async with semaphore:
+                item_ids_str = ",".join(chunk)
+                url = f"{self.base_url}/api/v2/stats/prices/{item_ids_str}.json"
+                params = {"locations": locations_str, "qualities": str(quality)}
+                async with httpx.AsyncClient(
+                    timeout=self.timeout,
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                ) as client:
+                    for attempt in range(5):
+                        try:
+                            response = await client.get(url, params=params)
+                            response.raise_for_status()
+                            rows = response.json()
+                            return [
+                                MarketPrice(
+                                    item_id=str(row.get("item_id", "")),
+                                    city=str(row.get("city", "")),
+                                    quality=int(row.get("quality", quality) or quality),
+                                    sell_price_min=float(row.get("sell_price_min", 0) or 0),
+                                    buy_price_max=float(row.get("buy_price_max", 0) or 0),
+                                    sell_price_min_date=str(row.get("sell_price_min_date", "")),
+                                    buy_price_max_date=str(row.get("buy_price_max_date", "")),
+                                    now_provider=self._now_provider,
+                                )
+                                for row in (rows if isinstance(rows, list) else [])
+                            ]
+                        except httpx.HTTPStatusError as exc:
+                            if exc.response.status_code == 429 and attempt < 4:
+                                retry_after = exc.response.headers.get("Retry-After")
+                                wait = float(retry_after) if retry_after and retry_after.isdigit() else 5.0 * (2**attempt)
+                                await asyncio.sleep(wait)
+                                continue
+                            raise
+                        except httpx.RequestError:
+                            if attempt < 4:
+                                await asyncio.sleep(1.0 * (2**attempt))
+                                continue
+                            raise
+                return []
+
+        all_results = await asyncio.gather(*[fetch_batch(b) for b in batches], return_exceptions=True)
+        out: List[MarketPrice] = []
+        for result in all_results:
+            if isinstance(result, list):
+                out.extend(result)
+        return out
 
     def get_history_bulk(
         self,
