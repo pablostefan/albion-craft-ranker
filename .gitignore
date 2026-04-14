@@ -22,3 +22,5 @@ Thumbs.db
 
 # IDE
 .idea/
+.vercel
+.env*.local
