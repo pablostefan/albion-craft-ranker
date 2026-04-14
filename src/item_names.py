@@ -67,6 +67,19 @@ _ADJECTIVE_TOKENS: frozenset[str] = frozenset({
     "HOLY", "NATURE", "FIRE", "FROST", "ARCANE", "CURSED",
 })
 
+_FULL_ITEM_NAMES: dict[str, str] = {
+    "QUESTITEM_TOKEN_AVALON": "Avalonian Energy",
+    "QUESTITEM_TOKEN_MISTS": "Mists Energy",
+    "QUESTITEM_TOKEN_ROYAL_T4": "Royal Sigil (T4)",
+    "QUESTITEM_TOKEN_ROYAL_T5": "Royal Sigil (T5)",
+    "QUESTITEM_TOKEN_ROYAL_T6": "Royal Sigil (T6)",
+    "QUESTITEM_TOKEN_ROYAL_T7": "Royal Sigil (T7)",
+    "QUESTITEM_TOKEN_ROYAL_T8": "Royal Sigil (T8)",
+    "QUESTITEM_TOKEN_ARENA_CRYSTAL": "Arena Sigil (Crystal)",
+    "QUESTITEM_TOKEN_ARENA_UNRANKED": "Arena Sigil",
+    "QUESTITEM_TOKEN_SMUGGLER": "Smuggler Token",
+}
+
 _SET_RE = re.compile(r"^SET(\d+)$")
 _TIER_RE = re.compile(r"^T(\d+)_")
 _ENCHANT_RE = re.compile(r"@(\d+)$")
@@ -83,6 +96,10 @@ def format_item_id(item_id: str) -> str:
     """
     if not item_id:
         return item_id
+
+    override = _FULL_ITEM_NAMES.get(item_id)
+    if override:
+        return override
 
     try:
         remaining = item_id
