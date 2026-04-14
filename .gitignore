@@ -11,7 +11,7 @@ frontend/.next/
 frontend/.turbo/
 
 # Data (large files)
-data/items.json
+# data/items.json  # tracked so Docker build on Render has game data
 
 # Output
 output/
