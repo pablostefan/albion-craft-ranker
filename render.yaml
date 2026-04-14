@@ -1,0 +1,14 @@
+services:
+  # Backend — FastAPI (Render Free Web Service)
+  - type: web
+    name: albion-craft-ranker-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: CORS_ORIGINS
+        value: https://albion-craft-ranker.vercel.app
+      - key: PORT
+        value: "8000"
+    healthCheckPath: /health
