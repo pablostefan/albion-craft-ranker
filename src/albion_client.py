@@ -127,7 +127,7 @@ class AlbionAPIClient:
         if self._owns_http_client:
             self._http_client.close()
 
-    def _get_json(self, path: str, params: Dict[str, str], retries: int = 3) -> List[dict]:
+    def _get_json(self, path: str, params: Dict[str, str], retries: int = 5) -> List[dict]:
         url = f"{self.base_url}{path}"
 
         for attempt in range(retries + 1):
@@ -139,12 +139,14 @@ class AlbionAPIClient:
                 return payload if isinstance(payload, list) else []
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 429 and attempt < retries:
-                    self._sleep(1 * (2 ** attempt))
+                    retry_after = exc.response.headers.get("Retry-After")
+                    wait = float(retry_after) if retry_after and retry_after.isdigit() else 5.0 * (2 ** attempt)
+                    self._sleep(wait)
                     continue
                 raise
             except httpx.RequestError:
                 if attempt < retries:
-                    self._sleep(1 * (2 ** attempt))
+                    self._sleep(1.0 * (2 ** attempt))
                     continue
                 raise
 
@@ -194,12 +196,15 @@ class AlbionAPIClient:
         if not unique_ids or not locations_str:
             return []
 
-        # Batch into chunks to avoid URL-too-long errors
-        batch_size = 100
+        # Batch into chunks to avoid URL-too-long errors and API rate limits.
+        # Smaller chunks (50) with a small inter-chunk delay prevents 429s.
+        batch_size = 50
         out: List[MarketPrice] = []
         for i in range(0, len(unique_ids), batch_size):
             chunk = unique_ids[i : i + batch_size]
             item_ids_str = ",".join(chunk)
+            if i > 0:
+                self._sleep(0.5)
             rows = self._get_json(
                 f"/api/v2/stats/prices/{item_ids_str}.json",
                 {
