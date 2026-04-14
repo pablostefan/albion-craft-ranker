@@ -8,7 +8,7 @@ services:
     autoDeploy: true
     envVars:
       - key: CORS_ORIGINS
-        value: https://frontend-pablo-stefan.vercel.app
+        value: https://albion-craft-ranker-pablo-stefan.vercel.app
       - key: PORT
         value: "8000"
     healthCheckPath: /health
